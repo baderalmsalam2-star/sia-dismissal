@@ -31,6 +31,34 @@
     .replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
     .replace(/\s+/g, '').toLowerCase();
 
+  // كلمات الاسم للمطابقة: بدون حركات ولا "ال" التعريف، و«عبد الله» تُعامل ككلمة وحدة
+  function nameWords(s) {
+    return arDigits(s)
+      .replace(/[ً-ْـ]/g, '')
+      .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+      .replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
+      .replace(/(^|\s)(عبد|ابو|بو|ام|اب)\s+/g, '$1$2')
+      .toLowerCase()
+      .split(/[\s._-]+/)
+      .filter((w) => w && !/^(بن|ابن|بنت|آل)$/.test(w))
+      .map((w) => (w.length > 4 ? w.replace(/^ال/, '') : w))
+      .filter(Boolean);
+  }
+
+  // كم يشبه الاسم القديم (a) الاسم الجديد (b)؟ 0 = ما يشبه، 100 = مطابق
+  function nameScore(a, b) {
+    if (!a.length || !b.length) return 0;
+    const has = (w) => b.some((x) => x === w || (x.length > 3 && w.length > 3 && (x.startsWith(w) || w.startsWith(x))));
+    const sameEnds = a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
+    const covered = a.filter(has).length;
+    if (covered < a.length && !sameEnds) return 0;
+    if (a.join(' ') === b.join(' ')) return 100;
+    let s = (covered / a.length) * 50;
+    if (a[0] === b[0]) s += 25;
+    if (a[a.length - 1] === b[b.length - 1]) s += 25;
+    return Math.round(s);
+  }
+
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* ignore */ } };
 
@@ -741,6 +769,7 @@
     let fb = lsGet('km-mb') || 'all';
     let fq = '';
     let pending = false;
+    let reviewing = false; // مراجعة الأسماء مفتوحة — ما نعيد الرسم حتى ما تضيع
 
     const bldSelect = (value, onchange, withAll) => {
       const s = el('select', { onchange: (e) => onchange(e.target.value) },
@@ -927,6 +956,127 @@
           }, 'إضافة')));
     }
 
+    // لصق الأسماء الكاملة (ثلاثية/رباعية) وتحديث أسماء الطلبة الموجودين بدل إضافتهم من جديد
+    function renameCard() {
+      const ta = el('textarea', {
+        rows: '6', dir: 'auto',
+        placeholder: 'الصق الأسماء الكاملة، كل سطر اسم\nمثال: عبدالله محمد فهد الصالح\nأو مع الصف: عبدالله محمد الصالح، G5A',
+      });
+      const scope = bldSelect(fb === 'all' ? null : fb, () => {}, true);
+      const out = el('div');
+      const card = el('section', { class: 'card' },
+        el('h2', null, 'تحديث الأسماء الكاملة'),
+        el('p', { class: 'hint' }, 'يطابق كل اسم مع الطالب الموجود ويحدّث اسمه فقط — ما يضيف أسماء مكررة. راجع المطابقة قبل الحفظ.'),
+        ta,
+        el('div', { class: 'inline wrap', style: 'margin-top:8px' },
+          el('span', null, 'ابحث في'), scope,
+          el('button', { class: 'btn primary', type: 'button', onclick: () => preview() }, 'طابِق وراجِع')),
+        out);
+
+      // قائمة اختيار الطالب — تُعبّأ عند فتحها فقط حتى ما تثقل الجوال
+      function targetSelect(chosenId, pool, byId) {
+        const label = (st) => `${st.n} · ${st.c || '—'}`;
+        const cur = byId[chosenId];
+        const s = el('select', { class: 'rn-target', 'aria-label': 'الطالب المقابل' },
+          el('option', { value: chosenId || '' }, cur ? label(cur) : '— تجاهل —'));
+        let filled = false;
+        const fill = () => {
+          if (filled) return;
+          filled = true;
+          const v = s.value;
+          s.replaceChildren(el('option', { value: '' }, '— تجاهل —'), pool.map((st) => el('option', { value: st.id }, label(st))));
+          s.value = v;
+        };
+        s.addEventListener('focus', fill);
+        s.addEventListener('pointerdown', fill);
+        return s;
+      }
+
+      function preview() {
+        const bid = scope.value;
+        const pool = students()
+          .filter((s) => bid === 'all' || s.b === bid)
+          .sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n));
+        const byId = Object.fromEntries(pool.map((s) => [s.id, s]));
+
+        const lines = [];
+        for (const raw of ta.value.split('\n')) {
+          const [n, c] = raw.split(/[،,\t]/).map((x) => (x || '').replace(/^[\s*\-•\d.)٠-٩]+/, '').trim());
+          if (n) lines.push({ name: n, cls: (c || '').trim(), w: nameWords(n) });
+        }
+        if (!lines.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه أسماء في المربع.')); return; }
+        if (!pool.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه طلبة في هذا النطاق.')); return; }
+        reviewing = true;
+
+        // نجمع كل الاحتمالات ونوزّعها من الأقوى للأضعف حتى ما يتكرر طالب
+        const pairs = [];
+        lines.forEach((ln, li) => {
+          pool.forEach((st) => {
+            const sc = nameScore(nameWords(st.n), ln.w);
+            if (sc >= 60) pairs.push({ li, id: st.id, sc });
+          });
+        });
+        pairs.sort((a, b) => b.sc - a.sc);
+        const takenLine = new Set();
+        const takenStu = new Set();
+        for (const p of pairs) {
+          if (takenLine.has(p.li) || takenStu.has(p.id)) continue;
+          takenLine.add(p.li);
+          takenStu.add(p.id);
+          lines[p.li].id = p.id;
+          lines[p.li].sc = p.sc;
+        }
+
+        const rows = lines.map((ln) => {
+          const sel = targetSelect(ln.id || '', pool, byId);
+          const cls = ln.id ? (ln.sc >= 85 ? '' : ' weak') : ' none';
+          return { ln, sel, node: el('div', { class: 'rn-row' + cls }, el('span', { class: 'rn-new' }, ln.name), sel) };
+        });
+        const matched = lines.filter((l) => l.id).length;
+        const missed = pool.filter((s) => !takenStu.has(s.id));
+
+        out.replaceChildren(
+          el('div', { class: 'rn-sum' },
+            el('span', null, `تطابق ${matched} من ${lines.length}`),
+            lines.length - matched ? el('span', { class: 'bad' }, `${lines.length - matched} بدون مقابل`) : null,
+            missed.length ? el('span', { class: 'muted' }, `${missed.length} طالب ما وصلهم تحديث`) : null),
+          el('div', { class: 'rn-out' }, rows.map((r) => r.node)),
+          el('button', {
+            class: 'btn primary big', type: 'button', style: 'margin-top:10px',
+            onclick: () => {
+              const patch = {};
+              const used = new Set();
+              let dup = 0;
+              let n = 0;
+              for (const r of rows) {
+                const id = r.sel.value;
+                if (!id || !byId[id]) continue;
+                if (used.has(id)) { dup++; continue; }
+                used.add(id);
+                if (byId[id].n !== r.ln.name) { patch[`${id}/n`] = r.ln.name; n++; }
+                if (r.ln.cls && byId[id].c !== r.ln.cls) patch[`${id}/c`] = r.ln.cls;
+              }
+              if (dup) { toast(`${dup} أسماء مربوطة بنفس الطالب — صحّحها أولًا`, 'err'); return; }
+              if (!Object.keys(patch).length) { toast('ما فيه تغيير'); return; }
+              write('PATCH', 'students', patch);
+              ta.value = '';
+              toast(`تم تحديث ${n} اسم`, 'ok');
+              reviewing = false;
+              render();
+            },
+          }, 'احفظ التحديث'),
+          el('button', {
+            class: 'btn ghost', type: 'button', style: 'margin-top:10px',
+            onclick: () => { reviewing = false; out.replaceChildren(); },
+          }, 'إلغاء'),
+          missed.length ? el('details', { style: 'margin-top:10px' },
+            el('summary', null, `طلبة ما وصلهم تحديث (${missed.length})`),
+            el('p', { class: 'hint' }, missed.map((s) => `${s.n} (${s.c || '—'})`).join('، '))) : null);
+      }
+
+      return card;
+    }
+
     function toolsCard() {
       return el('section', { class: 'card' },
         el('h2', null, 'أدوات'),
@@ -964,6 +1114,7 @@
         studentsCard(),
         linksCard(),
         settingsCard(),
+        renameCard(),
         bulkCard(),
         toolsCard());
       window.scrollTo(0, y);
@@ -971,6 +1122,7 @@
 
     // لا نعيد الرسم أثناء الكتابة في حقل حتى لا يضيع المؤشر
     const maybeRender = () => {
+      if (reviewing) { pending = true; return; }
       const a = document.activeElement;
       if (a && body.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) { pending = true; return; }
       render();
