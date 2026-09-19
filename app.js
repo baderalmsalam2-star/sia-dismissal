@@ -334,19 +334,74 @@
   }
 
   // ---------- العمليات ----------
-  function undoTo(id, prev) {
-    return () => (prev ? write('PUT', `calls/${id}`, prev) : write('DELETE', `calls/${id}`));
+  // نأخذ نسخة من الحالة السابقة، لأن الكتابة تعدّل الكائن نفسه
+  function undoTo(id) {
+    const prev = (root.calls || {})[id];
+    const snap = prev && typeof prev === 'object' ? { ...prev } : null;
+    return () => (snap ? write('PUT', `calls/${id}`, snap) : write('DELETE', `calls/${id}`));
   }
+
+  // آخر إجراء — يبقى متاحًا للتراجع حتى بعد اختفاء التنبيه
+  let lastAct = null;
+  function remember(label, fn) { lastAct = { label, fn }; }
+  function undoLast() {
+    if (!lastAct) return;
+    const a = lastAct;
+    lastAct = null;
+    a.fn();
+    toast(`تم التراجع عن ${a.label}`, 'ok');
+  }
+
   function callStudent(s) {
-    const prev = (root.calls || {})[s.id];
+    const fn = undoTo(s.id);
     write('PUT', `calls/${s.id}`, { t: SV });
     if (navigator.vibrate) navigator.vibrate(30);
-    toast(`تم نداء ${s.n}`, 'ok', { label: 'تراجع', fn: undoTo(s.id, prev) });
+    remember(`نداء ${s.n}`, fn);
+    toast(`تم نداء ${s.n}`, 'ok', { label: 'تراجع', fn: undoLast });
   }
   function markOut(s) {
-    const prev = (root.calls || {})[s.id];
+    const fn = undoTo(s.id);
     write('PATCH', `calls/${s.id}`, { o: SV });
-    toast(`${s.n} خرج`, '', { label: 'تراجع', fn: undoTo(s.id, prev) });
+    remember(`خروج ${s.n}`, fn);
+    toast(`${s.n} خرج`, '', { label: 'تراجع', fn: undoLast });
+  }
+
+  // زر التراجع الظاهر — يختفي إذا ما فيه إجراء
+  function undoButton(cls) {
+    const b = el('button', { class: cls, type: 'button', hidden: true, onclick: undoLast });
+    const upd = () => {
+      b.hidden = !lastAct;
+      if (lastAct) b.textContent = `↶ تراجع عن ${lastAct.label}`;
+    };
+    upd();
+    subs.add(upd);
+    return b;
+  }
+
+  // أزرار التمرير لأعلى/أسفل — تفيد على الجوال والقوائم الطويلة
+  function scrollPad() {
+    const by = (dir) => window.scrollBy({ top: dir * Math.round(window.innerHeight * 0.8), behavior: 'smooth' });
+    const up = el('button', { class: 'sp-btn', type: 'button', 'aria-label': 'أعلى', onclick: () => by(-1) }, '▲');
+    const down = el('button', { class: 'sp-btn', type: 'button', 'aria-label': 'أسفل', onclick: () => by(1) }, '▼');
+    const top = el('button', { class: 'sp-btn sp-top', type: 'button', 'aria-label': 'البداية', onclick: () => window.scrollTo({ top: 0, behavior: 'smooth' }) }, '⤒');
+    const pad = el('div', { class: 'scrollpad', hidden: true }, top, up, down);
+    const upd = () => {
+      const scrollable = document.documentElement.scrollHeight > window.innerHeight + 120;
+      pad.hidden = !scrollable;
+      if (!scrollable) return;
+      const y = window.scrollY;
+      top.hidden = y < 200;
+      up.disabled = y < 20;
+      down.disabled = y + window.innerHeight >= document.documentElement.scrollHeight - 20;
+    };
+    window.addEventListener('scroll', upd, { passive: true });
+    window.addEventListener('resize', upd);
+    const iv = setInterval(upd, 1200);
+    pad.dispose = () => { window.removeEventListener('scroll', upd); window.removeEventListener('resize', upd); clearInterval(iv); };
+    subs.add(upd); // بعد ما تتحمل القائمة
+    setTimeout(upd, 0);
+    upd();
+    return pad;
   }
 
   // ---------- أجزاء مشتركة ----------
@@ -371,7 +426,8 @@
 
   function topbar(title, withBack = true) {
     return el('header', { class: 'topbar' },
-      withBack ? el('a', { class: 'back', href: link('home'), 'aria-label': 'الرئيسية' }, '›') : null,
+      withBack ? el('a', { class: 'back', href: link('home'), 'aria-label': 'رجوع للرئيسية' },
+        el('span', { class: 'back-i' }, '›'), el('span', { class: 'back-t' }, 'رجوع')) : null,
       el('img', { class: 'topbar-logo', src: 'assets/logo.png', alt: '' }),
       el('div', { class: 'topbar-title' }, el('strong', null, title), el('small', null, CFG.schoolName || '')),
       statusPill());
@@ -512,11 +568,14 @@
     const jump = el('nav', { class: 'tabs', 'aria-label': 'الصفوف' });
     const summary = el('div', { class: 'summary' });
     const list = el('main', { class: 'call-list' });
+    const undoRow = el('div', { class: 'undo-row' }, undoButton('btn undo-btn'),
+      el('a', { class: 'btn small ghost', href: link('call') }, 'تغيير المبنى'));
+    const pad = scrollPad();
     app.append(
       bar,
       localBanner(),
-      el('div', { class: 'controls' }, el('div', { class: 'search-wrap' }, search, clearBtn), jump, summary),
-      list);
+      el('div', { class: 'controls' }, el('div', { class: 'search-wrap' }, search, clearBtn), jump, summary, undoRow),
+      list, pad);
 
     function render() {
       list.replaceChildren();
@@ -588,7 +647,7 @@
     subs.add(render);
     render();
     const iv = setInterval(render, 30000);
-    cleanup = () => clearInterval(iv);
+    cleanup = () => { clearInterval(iv); pad.dispose(); };
   }
 
   // ---------- صفحة المبنى / الصف (التلفزيون أو جوال المعلمة) ----------
@@ -652,14 +711,33 @@
       },
     }, '🔊 اضغط لتشغيل الصوت وملء الشاشة');
 
+    // الرجوع: نخرج من ملء الشاشة أولًا وإلا ما يبين زر الرجوع في المتصفح
+    async function goBack() {
+      try { if (document.fullscreenElement) await document.exitFullscreen(); } catch { /* ignore */ }
+      try { if (wakeLock) { await wakeLock.release(); wakeLock = null; } } catch { /* ignore */ }
+      location.hash = link('home');
+    }
+    const backBtn = el('button', { class: 'scr-back', type: 'button', 'aria-label': 'رجوع للرئيسية', onclick: goBack },
+      el('span', { class: 'back-i' }, '›'), el('span', null, 'رجوع'));
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !document.fullscreenElement) goBack();
+      else if (e.key === 'Backspace' && !/INPUT|TEXTAREA/.test((e.target || {}).tagName || '')) { e.preventDefault(); goBack(); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    const undoBtn = undoButton('scr-undo');
+    const pad = scrollPad();
+
     app.append(
       el('header', { class: 'scr-head' },
         el('a', { class: 'scr-home', href: link('home'), title: 'تغيير الرمز' },
           el('img', { class: 'scr-logo', src: 'assets/logo.png', alt: 'الرئيسية' })),
+        backBtn,
         el('div', { class: 'scr-title' }, title, sub),
+        undoBtn,
         stats,
         el('div', { class: 'scr-time' }, clock, dateEl)),
-      body, notFound, startBtn);
+      body, notFound, startBtn, pad);
 
     const cards = new Map();
     let first = true;
@@ -757,14 +835,21 @@
     render();
     const t1 = setInterval(tick, 1000);
     const t2 = setInterval(render, 15000);
-    cleanup = () => { clearInterval(t1); clearInterval(t2); document.removeEventListener('visibilitychange', onVis); };
+    cleanup = () => {
+      clearInterval(t1);
+      clearInterval(t2);
+      document.removeEventListener('visibilitychange', onVis);
+      document.removeEventListener('keydown', onKey);
+      pad.dispose();
+    };
   }
 
   // ---------- التوزيع والإعدادات ----------
   function viewManage() {
     document.body.className = 'page-manage';
     const body = el('main', { class: 'manage' });
-    app.append(topbar('التوزيع والإعدادات'), localBanner(), body);
+    const pad = scrollPad();
+    app.append(topbar('التوزيع والإعدادات'), localBanner(), body, pad);
 
     let fb = lsGet('km-mb') || 'all';
     let fq = '';
@@ -1131,6 +1216,7 @@
     body.addEventListener('focusout', onFocusOut);
     subs.add(maybeRender);
     render();
+    cleanup = () => pad.dispose();
   }
 
   route();
