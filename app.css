@@ -133,6 +133,8 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .screen-main small { color: var(--muted); font-size: .82rem; }
 .code-tag { margin-top: 6px; font-size: .82rem; color: var(--muted); }
 .code-tag b { background: var(--navy); color: #fff; border-radius: 6px; padding: 0 8px; font-size: .95rem; }
+.b-actions { display: flex; gap: 6px; padding: 0 14px 10px; }
+.b-actions .btn { flex: 1; }
 .map-link { font-size: .75rem; color: var(--muted); padding: 6px 14px 10px; text-decoration: none; border-top: 1px dashed var(--line); }
 .setup { text-align: center; }
 
@@ -161,7 +163,9 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .tabs.dim { opacity: .45; }
 .chip.on { background: var(--wait); color: #fff; border-color: var(--wait); }
 .summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .92rem; color: var(--muted); }
-.sum-stats b { color: var(--ink); margin-inline-end: 8px; }
+.sum-stats { white-space: nowrap; font-size: .85rem; }
+.sum-stats b { color: var(--ink); margin-inline-end: 4px; }
+.sum-stats .dot { margin-inline: 2px 4px; }
 .call-list { max-width: 720px; margin: 0 auto; padding: 8px 16px 110px; }
 .group {
   margin: 18px 0 8px; font-size: .95rem; color: var(--navy); display: flex; align-items: baseline; gap: 8px;
@@ -188,6 +192,36 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
   border: 0; background: var(--ok); color: #fff;
   font-weight: 800; padding: 0 20px; cursor: pointer; font-size: 1rem;
 }
+
+/* شبكة الأسماء في صفحة النداء */
+.ngrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.nt {
+  display: flex; flex-direction: column; background: var(--card);
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+}
+.nt-main {
+  flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: start;
+  border: 0; background: transparent; padding: 10px 12px; cursor: pointer; min-height: 58px; gap: 2px;
+}
+.nt-main:active { background: var(--teal-soft); }
+.nt-name { font-size: 1.05rem; font-weight: 700; line-height: 1.3; }
+.nt-meta { font-size: .78rem; color: var(--muted); }
+.nt-meta:empty { display: none; }
+.nt.called { background: var(--wait-bg); border-color: var(--wait-line); }
+.nt.called .nt-meta { color: #9a5200; font-weight: 700; }
+.nt.out { background: var(--ok-bg); border-color: var(--ok-line); }
+.nt.out .nt-name { color: #0f5a35; }
+.nt.out .nt-meta { color: var(--ok); font-weight: 700; }
+.nt-out { border: 0; background: var(--ok); color: #fff; font-weight: 800; padding: 8px; cursor: pointer; }
+.pick { display: grid; gap: 10px; }
+.pick-b {
+  display: flex; flex-direction: column; text-decoration: none; background: var(--card);
+  border: 1px solid var(--line); border-inline-start: 6px solid var(--navy); border-radius: 12px; padding: 16px 18px;
+}
+.pick-b strong { font-size: 1.3rem; color: var(--navy); }
+.pick-b small { color: var(--muted); }
+.pick-b.last { border-color: var(--teal-2); box-shadow: 0 0 0 2px var(--teal); }
+.group { justify-content: space-between; }
 
 /* ---------- التوزيع ---------- */
 .manage { max-width: 880px; margin: 0 auto; padding: 16px 16px 90px; display: grid; gap: 14px; }

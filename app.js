@@ -426,10 +426,13 @@
               el('strong', null, b.name),
               el('small', null, b.desc || ''),
               el('span', { class: 'code-tag' }, 'الرمز: ', el('b', null, b.code || '—'))),
-            b.map ? el('a', { class: 'map-link', href: b.map, target: '_blank', rel: 'noopener' }, '📍 ', b.addr || 'الموقع') : null))),
+            el('div', { class: 'b-actions' },
+              el('a', { class: 'btn small primary', href: link('call', { code: b.code || b.name }) }, '📣 النداء'),
+              el('a', { class: 'btn small', href: link('screen', { code: b.code || b.name }) }, '🖥️ الشاشة')),
+            b.map ?el('a', { class: 'map-link', href: b.map, target: '_blank', rel: 'noopener' }, '📍 ', b.addr || 'الموقع') : null))),
         el('a', { class: 'tile tile-call', href: link('call') },
           el('span', { class: 'tile-icon', 'aria-hidden': 'true' }, '📣'),
-          el('span', null, el('strong', null, 'النداء — المواقف'), el('small', null, 'للمسؤول: اضغط على اسم الطالب فيظهر عند مبناه وصفّه'))),
+          el('span', null, el('strong', null, 'النداء — المواقف'), el('small', null, 'للمسؤول عند كل مبنى: اضغط على اسم الطالب فيظهر على شاشة المبنى'))),
         el('a', { class: 'tile', href: link('manage') },
           el('span', { class: 'tile-icon', 'aria-hidden': 'true' }, '🗂️'),
           el('span', null, el('strong', null, 'التوزيع والإعدادات'), el('small', null, 'نقل الطلبة بين المباني، الإضافة والحذف، الروابط'))),
@@ -439,15 +442,35 @@
     render();
   }
 
-  // ---------- النداء (المواقف) ----------
+  // ---------- النداء (المواقف) — لكل مبنى نداؤه الخاص ----------
   function viewCall() {
     document.body.className = 'page-call';
+    const code = P.get('code') || '';
+
+    // بدون مبنى: اختيار المبنى أولًا
+    if (!code) {
+      const body = el('main', { class: 'home' });
+      app.append(topbar('النداء — اختر المبنى'), localBanner(), body);
+      const render = () => {
+        const last = lsGet('km-call-code');
+        body.replaceChildren(
+          el('p', { class: 'hint' }, 'كل مبنى له نداؤه الخاص. اختر المبنى اللي أنت عنده:'),
+          el('div', { class: 'pick' }, buildings().map((b) => el('a', {
+            class: 'pick-b' + (String(b.code) === last ? ' last' : ''),
+            href: link('call', { code: b.code || b.name }),
+          }, el('strong', null, b.name), el('small', null, b.desc || '')))));
+      };
+      subs.add(render);
+      render();
+      return;
+    }
+
+    lsSet('km-call-code', code);
     let q = '';
-    let bf = lsGet('km-bf') || 'all';
     let onlyCalled = false;
 
     const search = el('input', {
-      class: 'search', type: 'search', placeholder: 'ابحث باسم الطالب أو العائلة أو الصف…',
+      class: 'search', type: 'search', placeholder: 'ابحث باسم الطالب أو العائلة…',
       autocomplete: 'off', enterkeyhint: 'search', 'aria-label': 'بحث',
     });
     const clearBtn = el('button', {
@@ -456,71 +479,81 @@
     }, '×');
     search.addEventListener('input', () => { q = search.value; render(); });
 
-    const tabs = el('nav', { class: 'tabs', 'aria-label': 'المباني' });
+    const bar = topbar('النداء');
+    const titleEl = bar.querySelector('.topbar-title strong');
+    const jump = el('nav', { class: 'tabs', 'aria-label': 'الصفوف' });
     const summary = el('div', { class: 'summary' });
     const list = el('main', { class: 'call-list' });
     app.append(
-      topbar('النداء — المواقف'),
+      bar,
       localBanner(),
-      el('div', { class: 'controls' }, el('div', { class: 'search-wrap' }, search, clearBtn), tabs, summary),
+      el('div', { class: 'controls' }, el('div', { class: 'search-wrap' }, search, clearBtn), jump, summary),
       list);
 
     function render() {
-      const blds = buildings();
-      if (bf !== 'all' && !blds.some((b) => b.id === bf)) bf = 'all';
+      list.replaceChildren();
+      if (!ready) { list.append(el('p', { class: 'empty-note' }, 'جاري التحميل…')); return; }
+      const scope = resolveCode(code);
+      if (!scope) {
+        list.append(el('p', { class: 'empty-note' }, 'ما لقينا المبنى. ', el('a', { href: link('call') }, 'اختر المبنى')));
+        return;
+      }
+      titleEl.textContent = `النداء — ${scope.title}`;
+      document.title = `نداء ${scope.title}`;
 
-      tabs.replaceChildren(...[{ id: 'all', label: 'الكل' }, ...blds.map((b) => ({ id: b.id, label: b.name }))]
-        .map((t) => el('button', {
-          class: 'tab' + (bf === t.id ? ' on' : ''), type: 'button', 'aria-pressed': String(bf === t.id),
-          onclick: () => { bf = t.id; lsSet('km-bf', bf); render(); },
-        }, t.label)));
-
-      const nq = norm(q);
-      // البحث يشمل كل المباني دائمًا، والتبويب يحدد القائمة بدون بحث
-      const scope = students().filter((s) => nq || bf === 'all' || s.b === bf).map((s) => ({ ...s, ...stateOf(s.id) }));
-      tabs.classList.toggle('dim', !!nq);
-      const nCalled = scope.filter((s) => s.st === 'called').length;
-      const nOut = scope.filter((s) => s.st === 'out').length;
+      const all = [...scope.ids].map((id) => ({ id, ...root.students[id], ...stateOf(id) }));
+      const nCalled = all.filter((s) => s.st === 'called').length;
+      const nOut = all.filter((s) => s.st === 'out').length;
       summary.replaceChildren(
         el('span', { class: 'sum-stats' },
           el('span', { class: 'dot called' }), 'ينتظر ', el('b', null, String(nCalled)),
-          el('span', { class: 'dot out' }), 'خرج ', el('b', null, String(nOut))),
+          el('span', { class: 'dot out' }), 'خرج ', el('b', null, String(nOut)),
+          el('span', { class: 'dot none' }), 'الباقي ', el('b', null, String(all.length - nCalled - nOut))),
         el('button', {
           class: 'chip' + (onlyCalled ? ' on' : ''), type: 'button', 'aria-pressed': String(onlyCalled),
           onclick: () => { onlyCalled = !onlyCalled; render(); },
         }, onlyCalled ? 'عرض الكل' : 'المنتظرين فقط'));
 
-      const rows = scope.filter((s) => (!onlyCalled || s.st === 'called')
+      const nq = norm(q);
+      const rows = all.filter((s) => (!onlyCalled || s.st === 'called')
         && (!nq || norm(s.n).includes(nq) || norm(s.c).includes(nq)));
 
-      list.replaceChildren();
-      if (!ready) { list.append(el('p', { class: 'empty-note' }, 'جاري التحميل…')); return; }
+      // أزرار الانتقال السريع للصفوف
+      const classes = [...new Set(rows.map((s) => s.c))].sort(cmpClass);
+      jump.replaceChildren(...(onlyCalled ? [] : classes.map((c) => el('button', {
+        class: 'tab', type: 'button',
+        onclick: () => {
+          const h = list.querySelector(`[data-class="${CSS.escape(c)}"]`);
+          if (h) window.scrollTo({ top: h.getBoundingClientRect().top + window.scrollY - document.querySelector('.controls').getBoundingClientRect().bottom - 8, behavior: 'smooth' });
+        },
+      }, c))));
+
       if (!rows.length) {
         list.append(el('p', { class: 'empty-note' }, onlyCalled ? 'ما فيه أحد ينتظر الحين.' : 'ما فيه نتائج.'));
         return;
       }
 
-      const bOrder = new Map(blds.map((b, i) => [b.id, i]));
-      rows.sort((a, b) => (bOrder.get(a.b) ?? 99) - (bOrder.get(b.b) ?? 99) || cmpClass(a.c, b.c) || cmpText(a.n, b.n));
-      if (onlyCalled) rows.sort((a, b) => b.t - a.t);
+      const tile = (s) => el('div', { class: 'nt ' + s.st },
+        el('button', { class: 'nt-main', type: 'button', onclick: () => callStudent(s) },
+          el('span', { class: 'nt-name' }, s.n),
+          el('span', { class: 'nt-meta' },
+            s.st === 'called' ? `⏳ ينتظر · ${ago(s.t)}`
+              : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
+              : (onlyCalled || nq ? s.c : ''))),
+        s.st === 'called'
+          ? el('button', { class: 'nt-out', type: 'button', 'aria-label': `${s.n} خرج`, onclick: () => markOut(s) }, 'خرج ✓')
+          : null);
 
-      let lastGroup = null;
-      for (const s of rows) {
-        const group = onlyCalled ? null : `${s.b}|${s.c}`;
-        if (group && group !== lastGroup) {
-          lastGroup = group;
-          list.append(el('h4', { class: 'group' }, s.c || '—', bf === 'all' || nq ? el('small', null, bldName(s.b)) : null));
-        }
-        const meta = s.st === 'called' ? `⏳ ينتظر الخروج · ${ago(s.t)}`
-          : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
-          : (onlyCalled || nq ? `${s.c} · ${bldName(s.b)}` : 'اضغط للنداء');
-        list.append(el('div', { class: 'st ' + s.st },
-          el('button', { class: 'st-main', type: 'button', onclick: () => callStudent(s) },
-            el('span', { class: 'st-name' }, s.n),
-            el('span', { class: 'st-meta' }, meta)),
-          s.st === 'called'
-            ? el('button', { class: 'st-x', type: 'button', 'aria-label': `${s.n} خرج`, onclick: () => markOut(s) }, 'خرج')
-            : null));
+      if (onlyCalled) {
+        list.append(el('div', { class: 'ngrid' }, rows.sort((a, b) => b.t - a.t).map(tile)));
+        return;
+      }
+      for (const c of classes) {
+        const items = rows.filter((s) => s.c === c).sort((a, b) => cmpText(a.n, b.n));
+        const outN = items.filter((s) => s.st === 'out').length;
+        list.append(
+          el('h4', { class: 'group', 'data-class': c }, c, el('small', null, `${outN}/${items.length} خرج`)),
+          el('div', { class: 'ngrid' }, items.map(tile)));
       }
     }
 
@@ -729,8 +762,10 @@
           ? 'كل رابط فيه رمز المدرسة. أرسل رابط الصفحة الرئيسية للمعلمات، وكل وحدة تكتب رمز مبناها أو صفها.'
           : 'الروابط تشتغل الحين على هذا الجهاز فقط (وضع تجريبي).'),
         row('🏠 الصفحة الرئيسية (للمعلمات)', absLink('home')),
-        row('📣 صفحة النداء (المواقف)', absLink('call')),
-        buildings().map((b) => row(`🖥️ ${b.name} — الرمز ${b.code || '—'}`, absLink('screen', { code: b.code || b.name }))),
+        buildings().map((b) => [
+          row(`📣 نداء ${b.name} (المواقف)`, absLink('call', { code: b.code || b.name })),
+          row(`🖥️ شاشة ${b.name} — الرمز ${b.code || '—'}`, absLink('screen', { code: b.code || b.name })),
+        ]),
         el('details', null,
           el('summary', null, 'روابط الصفوف (رمز كل صف)'),
           el('p', { class: 'hint' }, 'البنين: G ورقم الصف (G5). البنات: B ورقم الصف (B6). الشعبة: G5A.'),
