@@ -350,7 +350,7 @@
   }
 
   function localBanner() {
-    if (REMOTE) return null;
+    if (REMOTE) return '';
     return el('div', { class: 'banner' },
       el('strong', null, 'وضع تجريبي: '),
       DB ? 'افتح رابط المدرسة (فيه الرمز) عشان تتزامن الأجهزة.'
@@ -958,7 +958,7 @@
           el('button', {
             class: 'btn primary big', type: 'button',
             onclick: () => { write('PUT', '', JSON.parse(JSON.stringify(window.SEED))); toast('تمت التعبئة', 'ok'); },
-          }, 'تعبئة القائمة')) : null,
+          }, 'تعبئة القائمة')) : '',
         buildingsCard(),
         moveClassCard(),
         studentsCard(),
