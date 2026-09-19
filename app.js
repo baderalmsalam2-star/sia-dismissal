@@ -855,6 +855,11 @@
     let fq = '';
     let pending = false;
     let reviewing = false; // مراجعة الأسماء مفتوحة — ما نعيد الرسم حتى ما تضيع
+    const openBoxes = new Set(); // الأقسام المفتوحة، حتى ما تنسكر عند إعادة الرسم
+    const keepOpen = (id) => ({
+      open: openBoxes.has(id) ? true : null,
+      ontoggle: (e) => (e.target.open ? openBoxes.add(id) : openBoxes.delete(id)),
+    });
 
     const bldSelect = (value, onchange, withAll) => {
       const s = el('select', { onchange: (e) => onchange(e.target.value) },
@@ -880,7 +885,7 @@
           row(`📣 نداء ${b.name} (المواقف)`, absLink('call', { code: b.code || b.name })),
           row(`🖥️ شاشة ${b.name} — الرمز ${b.code || '—'}`, absLink('screen', { code: b.code || b.name })),
         ]),
-        el('details', null,
+        el('details', keepOpen('grades'),
           el('summary', null, 'روابط الصفوف (رمز كل صف)'),
           el('p', { class: 'hint' }, 'البنين: G ورقم الصف (G5). البنات: B ورقم الصف (B6). الشعبة: G5A.'),
           grades.map((g) => row(`🖥️ ${g}`, absLink('screen', { code: g })))));
@@ -893,7 +898,7 @@
         el('div', { class: 'bld-head' }, el('span', null, 'الاسم'), el('span', null, 'الرمز'), el('span', null, 'الوصف'), el('span')),
         blds.map((b) => {
           const n = students().filter((s) => s.b === b.id).length;
-          return el('div', { class: 'bld-row' },
+          return el('div', { class: 'bld-item' }, el('div', { class: 'bld-row' },
             el('input', {
               value: b.name || '', 'aria-label': 'اسم المبنى',
               onchange: (e) => { const v = e.target.value.trim(); if (v) write('PATCH', `buildings/${b.id}`, { name: v }); },
@@ -914,7 +919,26 @@
               class: 'btn small ghost', type: 'button', disabled: n > 0 ? true : null,
               title: n > 0 ? `فيه ${n} طالب — انقلهم أولًا` : 'حذف',
               onclick: () => { if (confirm(`حذف ${b.name}؟`)) write('DELETE', `buildings/${b.id}`); },
-            }, 'حذف'));
+            }, 'حذف')),
+          // العنوان ورابط الخريطة — يظهران للمعلمات في الصفحة الرئيسية
+          el('details', { class: 'bld-extra', ...keepOpen('loc' + b.id) },
+            el('summary', null, b.map ? '📍 الموقع — مضبوط' : '📍 أضف موقع المبنى على الخريطة'),
+            el('div', { class: 'bld-loc' },
+              el('input', {
+                value: b.addr || '', placeholder: 'العنوان (مثل: قطعة 3، شارع 5)', 'aria-label': `عنوان ${b.name}`,
+                onchange: (e) => write('PATCH', `buildings/${b.id}`, { addr: e.target.value.trim() }),
+              }),
+              el('input', {
+                value: b.map || '', placeholder: 'الصق رابط خرائط قوقل', dir: 'ltr', type: 'url',
+                'aria-label': `رابط خريطة ${b.name}`, inputmode: 'url',
+                onchange: (e) => {
+                  const v = e.target.value.trim();
+                  if (v && !/^https?:\/\//i.test(v)) { toast('الرابط لازم يبدأ بـ https', 'err'); return; }
+                  write('PATCH', `buildings/${b.id}`, { map: v });
+                  toast(v ? `تم حفظ موقع ${b.name}` : `تم مسح موقع ${b.name}`, 'ok');
+                },
+              }),
+              b.map ? el('a', { class: 'btn small', href: b.map, target: '_blank', rel: 'noopener' }, 'جرّب الرابط') : null)));
         }),
         el('button', {
           class: 'btn', type: 'button',

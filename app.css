@@ -254,7 +254,12 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 details summary { cursor: pointer; padding: 10px 0 4px; font-weight: 700; color: var(--navy); }
 .bld-head, .bld-row { display: grid; grid-template-columns: 1.2fr 80px 2fr auto; gap: 8px; align-items: center; }
 .bld-head { font-size: .8rem; color: var(--muted); margin-bottom: 4px; }
-.bld-row { margin-bottom: 8px; }
+.bld-item { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.bld-item:last-of-type { border-bottom: 0; }
+.bld-row { margin-bottom: 6px; }
+.bld-extra summary { font-size: .85rem; color: var(--muted); cursor: pointer; padding: 2px 0; }
+.bld-extra[open] summary { margin-bottom: 8px; font-weight: 700; color: var(--navy); }
+.bld-loc { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: 8px; align-items: center; }
 .code-field { text-align: center; font-weight: 800; }
 .num { width: 90px; }
 .add-row { display: grid; grid-template-columns: 2fr 1fr 1.4fr auto; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
@@ -285,6 +290,7 @@ code { background: var(--teal-soft); padding: 2px 6px; border-radius: 6px; direc
   .bld-head { display: none; }
   .bld-row { grid-template-columns: 1fr 70px; padding: 8px; background: var(--bg); border-radius: 10px; }
   .bld-row input:nth-child(3), .bld-row .btn { grid-column: 1 / -1; }
+  .bld-loc { grid-template-columns: 1fr; }
 }
 
 /* على الشاشات الضيقة نخفي الشعار عشان يفضى مكان لزر الرجوع */
