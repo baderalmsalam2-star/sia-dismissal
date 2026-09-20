@@ -292,18 +292,33 @@
 
   // معلومات الصف من اسمه: "G5A" ← صف 5 شعبة A، "بنات G6" ← بنات صف 6
   function classInfo(label) {
-    const L = arDigits(label);
-    const m = L.match(/(\d{1,2})\s*([A-Za-z])?/);
+    const L = arDigits(label).trim();
+    // الصيغة المعتمدة: BG1A — B/G للفئة (بنين/بنات)، ثم G للمرحلة، ثم رقمها، ثم الشعبة
+    const m = L.match(/^([BG])\s*G\s*(\d{1,2})\s*([A-Za-z])?$/i);
+    if (m) {
+      return {
+        n: Number(m[2]),
+        sec: (m[3] || '').toUpperCase(),
+        girls: m[1].toUpperCase() === 'G',
+      };
+    }
+    // صيغ قديمة ما زالت في البيانات: G5A و«بنات G6» وأسماء الرعاية
+    const old = L.match(/(\d{1,2})\s*([A-Za-z])?/);
     return {
-      n: m ? Number(m[1]) : null,
-      sec: m && m[2] ? m[2].toUpperCase() : '',
+      n: old ? Number(old[1]) : null,
+      sec: old && old[2] ? old[2].toUpperCase() : '',
       girls: /بنات/.test(L),
     };
   }
+  // رمز الصف بالصيغة المعتمدة، لتوليد الروابط
+  const classCode = (i) => (i.girls ? 'GG' : 'BG') + i.n + (i.sec || '');
   function cmpClass(a, b) {
     const x = classInfo(a);
     const y = classInfo(b);
-    return (x.n ?? 99) - (y.n ?? 99) || cmpText(x.sec, y.sec) || cmpText(a, b);
+    return (x.girls ? 1 : 0) - (y.girls ? 1 : 0)
+      || (x.n ?? 99) - (y.n ?? 99)
+      || cmpText(x.sec, y.sec)
+      || cmpText(a, b);
   }
 
   const buildings = () => Object.entries(root.buildings || {})
@@ -365,11 +380,16 @@
       const n = Number(m[1]);
       if (n >= 1 && n <= 12) return gradeScope(n, '', false, pick);
     }
-    // بنات: B6 / بنات 6 / girls 6
-    if ((m = c.match(/^(?:بنات|girls|b)(?:grade|g|صف|الصف)?(\d{1,2})$/)) || (m = c.match(/^(?:grade|g|صف|الصف)?(\d{1,2})بنات$/))) {
-      return gradeScope(Number(m[1]), '', true, pick);
+    // الصيغة المعتمدة: BG1A بنين، GG1B بنات، وبدون حرف الشعبة تعني المرحلة كاملة.
+    // تُفحص أولًا لأن «bg6» بالصيغة القديمة كانت تعني بنات الصف السادس والآن تعني بنينه.
+    if ((m = c.match(/^([bg])g(\d{1,2})([a-z])?$/))) {
+      return gradeScope(Number(m[2]), (m[3] || '').toUpperCase(), m[1] === 'g', pick);
     }
-    // صف أو شعبة: G5 / grade five / G5A / 5A / صف خامس
+    // بنات بالعربي: بنات 6 / girls 6
+    if ((m = c.match(/^(?:بنات|girls)(?:grade|g|صف|الصف)?(\d{1,2})([a-z])?$/)) || (m = c.match(/^(?:grade|g|صف|الصف)?(\d{1,2})([a-z])?بنات$/))) {
+      return gradeScope(Number(m[1]), (m[2] || '').toUpperCase(), true, pick);
+    }
+    // صيغ قديمة ما زالت تعمل: G5 / grade five / G5A / 5A / صف خامس (بنين)
     if ((m = c.match(/^(?:grade|gr|g|صف|الصف|جريد)?(\d{1,2})([a-d])?$/))) {
       return gradeScope(Number(m[1]), (m[2] || '').toUpperCase(), false, pick);
     }
@@ -390,7 +410,12 @@
       return i.n === n && i.girls === girls && (!sec || i.sec === sec);
     });
     if (!ids.size) return null;
-    return { title: `${girls ? 'بنات · ' : ''}Grade ${n}${sec}`, sub: '', ids };
+    // العنوان بالعربي والرمز المعتمد بين قوسين، فالواجهة عربية والرمز هو ما تعرفه المعلمة
+    return {
+      title: `${girls ? 'بنات' : 'بنين'} · الصف ${n}${sec ? ' شعبة ' + sec : ''}`,
+      sub: classCode({ n, sec, girls }),
+      ids,
+    };
   }
 
   // ---------- تنبيه صغير ----------
@@ -541,7 +566,7 @@
 
   function codeForm(big) {
     const input = el('input', {
-      class: 'code-input', placeholder: 'رقم المبنى أو الصف (٢٥ / G5)', autocomplete: 'off',
+      class: 'code-input', placeholder: 'رقم المبنى أو الصف (٢٥ / BG1A)', autocomplete: 'off',
       enterkeyhint: 'go', 'aria-label': 'رمز الدخول', value: '',
     });
     const err = el('p', { class: 'code-err', role: 'alert' });
@@ -955,7 +980,9 @@
 
       title.textContent = arNum(scope.title);
       updPin();
-      sub.textContent = arNum([scope.sub, CFG.schoolName].filter(Boolean).join(' · '));
+      // اسم المدرسة أولًا: لو انتهى السطر برمز إنجليزي (G5) وقع الفاصل «·»
+      // بعده بحكم اتجاه النص فصار يُقرأ «G50»
+      sub.textContent = arNum([CFG.schoolName, scope.sub].filter(Boolean).join(' · '));
       document.title = arNum(`${scope.title} · نداء الانصراف`);
 
       const list = [...scope.ids].map((id) => ({ id, ...root.students[id], ...stateOf(id) }));
@@ -1098,7 +1125,7 @@
         el('a', { href: url, target: '_blank', rel: 'noopener' }, label),
         el('button', { class: 'btn small', type: 'button', onclick: () => copy(url, label) }, 'نسخ'));
       const grades = [...new Set(students().map((s) => classInfo(s.c)).filter((i) => i.n)
-        .map((i) => (i.girls ? `B${i.n}` : `G${i.n}`)))].sort(cmpClass);
+        .map((i) => classCode({ n: i.n, sec: '', girls: i.girls })))].sort(cmpClass);
       return el('section', { class: 'card' },
         el('h2', null, 'الروابط'),
         el('p', { class: 'hint' }, REMOTE
@@ -1115,7 +1142,7 @@
         ]),
         el('details', keepOpen('grades'),
           el('summary', null, 'روابط الصفوف (رمز كل صف)'),
-          el('p', { class: 'hint' }, 'البنين: G ورقم الصف (G5). البنات: B ورقم الصف (B6). الشعبة: G5A.'),
+          el('p', { class: 'hint' }, 'الرمز: B للبنين أو G للبنات، ثم G، ثم رقم المرحلة، ثم حرف الشعبة. مثال: BG1A بنين أولى شعبة A، وGG1B بنات أولى شعبة B. وبدون حرف الشعبة (BG1) تفتح المرحلة كاملة.'),
           grades.map((g) => row(`🖥️ ${g}`, absLink('screen', { code: g })))));
     }
 
