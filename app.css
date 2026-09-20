@@ -78,6 +78,14 @@ body {
   line-height: 1.5;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
+
+/* رسالة الإقلاع: app.js يمسحها فورًا، فلا تظهر إلا إذا لم يشتغل أصلًا */
+.boot-note {
+  opacity: 0; animation: boot-note 0s linear 4s forwards;
+  display: flex; flex-direction: column; gap: 10px; text-align: center;
+  padding: 40px 20px; font-size: 20px; line-height: 1.7;
+}
+@keyframes boot-note { to { opacity: 1; } }
 a { color: var(--navy); }
 [hidden] { display: none !important; }
 .muted { color: var(--muted); font-size: .9em; }
@@ -306,7 +314,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .nt-main.is-called:active { background: transparent; }
 /* إجراءان صريحان للمنتظر: «غلط» يلغي النداء، و«خرج» يؤكّد خروجه */
 .nt-acts { display: grid; grid-template-columns: 34% 1fr; }
-.nt-out { border: 0; background: var(--ok); color: #fff; font-weight: 800; padding: 8px; cursor: pointer; }
+.nt-out { border: 0; background: var(--ok); color: #fff; font-weight: 800; padding: 8px 4px; cursor: pointer; font-size: .9rem; white-space: nowrap; }
 .nt-cancel {
   border: 0; border-inline-end: 1px solid rgba(255,255,255,.35);
   background: #8a3b36; color: #fff; font-weight: 800; padding: 8px 4px; cursor: pointer;

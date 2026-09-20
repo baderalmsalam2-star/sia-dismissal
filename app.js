@@ -102,6 +102,15 @@
     return arNum(`${Math.floor(e / 60)}:${String(e % 60).padStart(2, '0')}`);
   }
 
+  // جمع عربي سليم على نمط ago(): اسم واحد، اسمان، ٣ أسماء، ١١ اسمًا
+  function plural(n, one, two, few, many) {
+    if (n === 1) return one;
+    if (n === 2) return two;
+    return `${n} ${n % 100 >= 3 && n % 100 <= 10 ? few : many}`;
+  }
+  const names = (n) => plural(n, 'اسم واحد', 'اسمان', 'أسماء', 'اسمًا');
+  const pupils = (n) => plural(n, 'طالب واحد', 'طالبان', 'طلبة', 'طالبًا');
+
   function ago(t) {
     const m = Math.floor((now() - t) / 60000);
     if (m < 1) return 'الآن';
@@ -960,14 +969,18 @@
         },
       }, c))));
 
-      if (!rows.length) {
-        list.append(el('p', { class: 'empty-note' }, onlyCalled ? 'ما فيه أحد ينتظر الحين.' : 'ما فيه نتائج.'));
-        return;
-      }
+      // الأخ يجي على باب مبنى أخيه أحيانًا. البحث كان يقف عند حدود المبنى
+      // فيرد «ما فيه نتائج»، والصحيح أن نعرضه ومعه اسم مبناه
+      const others = (!onlyCalled && nq.length >= 2 ? students() : [])
+        .filter((s) => !scope.ids.has(s.id) && (norm(s.n).includes(nq) || norm(s.c).includes(nq)))
+        .map((s) => ({ ...s, ...stateOf(s.id) }))
+        .sort((a, b) => cmpText(a.n, b.n))
+        .slice(0, 12);
 
-      const tile = (s) => {
+      const tile = (s, showB) => {
         const meta = s.st === 'called' ? `${s.late ? '⚠️ تأخّر' : '⏳ ينتظر'} · ${ago(s.t)}`
           : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
+          : showB ? `${s.c} · ${bldName(s.b)}`
           : (onlyCalled || nq ? s.c : '');
         // الطالب المنادى لا يُعاد نداؤه بلمسة على اسمه — الإجراءان صريحان تحته
         const head = s.st === 'called'
@@ -987,15 +1000,31 @@
                   class: 'nt-cancel', type: 'button', 'aria-label': `إلغاء نداء ${s.n}`,
                   onclick: () => cancelCall(s),
                 }, '✕ غلط'),
+                // أمر لا خبر: «خرج ✓» كان يُقرأ إعلانًا عن حالته فلا يضغطه أحد
                 el('button', {
-                  class: 'nt-out', type: 'button', 'aria-label': `${s.n} خرج`,
+                  class: 'nt-out', type: 'button', 'aria-label': `تأكيد خروج ${s.n}`,
                   onclick: () => markOut(s),
-                }, 'خرج ✓'))
+                }, 'أكّد الخروج ✓'))
             : null);
       };
 
+      const elsewhere = () => {
+        if (!others.length) return;
+        list.append(
+          el('h4', { class: 'group other' }, 'من مبانٍ ثانية', el('small', null, 'نداؤهم يظهر على شاشة مبناهم')),
+          el('div', { class: 'ngrid' }, others.map((s) => tile(s, true))));
+      };
+
+      if (!rows.length) {
+        list.append(el('p', { class: 'empty-note' },
+          onlyCalled ? 'ما فيه أحد ينتظر الحين.'
+            : others.length ? 'ما فيه نتائج في هذا المبنى.' : 'ما فيه نتائج.'));
+        elsewhere();
+        return;
+      }
+
       if (onlyCalled) {
-        list.append(el('div', { class: 'ngrid' }, rows.sort((a, b) => b.t - a.t).map(tile)));
+        list.append(el('div', { class: 'ngrid' }, rows.sort((a, b) => b.t - a.t).map((s) => tile(s))));
         return;
       }
       for (const c of classes) {
@@ -1003,8 +1032,9 @@
         const outN = items.filter((s) => s.st === 'out').length;
         list.append(
           el('h4', { class: 'group', 'data-class': c }, c, el('small', null, `${outN}/${items.length} خرج`)),
-          el('div', { class: 'ngrid' }, items.map(tile)));
+          el('div', { class: 'ngrid' }, items.map((s) => tile(s))));
       }
+      elsewhere();
     }
 
     // إعادة الرسم تحت الإصبع تسرق الضغطة أو تنقلها لاسم ثانٍ، فنؤجّلها
@@ -1597,7 +1627,7 @@
               const n = Object.keys(patch).length;
               if (!n) { toast('الصف أصلًا في هذا المبنى'); return; }
               write('PATCH', 'students', patch);
-              toast(`تم نقل ${n} من ${c} إلى ${bldName(b)}`, 'ok');
+              toast(`تم نقل ${pupils(n)} من ${c} إلى ${bldName(b)}`, 'ok');
             },
           }, 'نقل')));
     }
@@ -1676,7 +1706,7 @@
               if (!i) { toast('ما فيه أسماء'); return; }
               write('PATCH', 'students', patch);
               ta.value = '';
-              toast(`تمت إضافة ${i} اسم`, 'ok');
+              toast(`تمت إضافة ${names(i)}`, 'ok');
             },
           }, 'إضافة')));
     }
@@ -1804,11 +1834,11 @@
                 // نقل الصف على مطابقة ظنّية ينقل الطالب لصف غلط، فنشترط اليقين
                 if (r.ln.cls && byId[id].c !== r.ln.cls && (r.ln.manual || r.ln.sc === 100)) patch[`${id}/c`] = r.ln.cls;
               }
-              if (dup) { toast(`${dup} أسماء مربوطة بنفس الطالب — صحّحها أولًا`, 'err'); return; }
+              if (dup) { toast(`${names(dup)} مربوطة بنفس الطالب — صحّحها أولًا`, 'err'); return; }
               if (!Object.keys(patch).length) { toast('ما فيه تغيير'); return; }
               write('PATCH', 'students', patch);
               ta.value = '';
-              toast(`تم تحديث ${n} اسم`, 'ok');
+              toast(`تم تحديث ${names(n)}`, 'ok');
               reviewing = false;
               render();
             },
@@ -1910,7 +1940,7 @@
       const empty = !Object.keys(root.students || {}).length;
       body.replaceChildren(
         empty && window.SEED ? el('section', { class: 'card warn' },
-          el('p', null, `القائمة فاضية. عبّئها بالقائمة الأولية (${Object.keys(window.SEED.students).length} طالب وطالبة):`),
+          el('p', null, `القائمة فاضية. عبّئها بالقائمة الأولية (${pupils(Object.keys(window.SEED.students).length)}):`),
           el('button', {
             class: 'btn primary big', type: 'button',
             onclick: () => { seedFill(); toast('تمت التعبئة', 'ok'); },

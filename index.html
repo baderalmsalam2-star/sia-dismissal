@@ -18,15 +18,25 @@
   <!-- لا تضف <link rel="manifest">: عند الإضافة للشاشة الرئيسية يفتح iOS رابط start_url
        ويرمي رمز المدرسة الموجود في الـ hash، فيبدأ التطبيق فاضيًا. أيقونة الشعار
        واسم "انصراف" يكفيهما وسوم apple-* أعلاه على iOS و Android. -->
+  <!-- كل شيء من هذا الموقع، ولا اتصال إلا بقاعدة البيانات. لو انحقن سطر في
+       اسم طالب أو في رابط خريطة، فلا سكربت خارجي ينفّذه ولا وجهة يُرسل إليها شيء.
+       المتصفح القديم يتجاهل هذا السطر فلا يتأثر العرض. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.firebasedatabase.app https://*.firebaseio.com; base-uri 'none'; form-action 'none'">
   <!-- الخط مستضاف داخل assets/ في app.css — لا مورد خارجي يحجب العرض -->
   <!-- غيّر رقم v عند كل تحديث حتى تحمّل الأجهزة النسخة الجديدة -->
   <link rel="stylesheet" href="app.css?v=26">
 </head>
 <body>
-  <div id="app"></div>
+  <!-- هذه الرسالة تُمسح فور اشتغال app.js، وتظهر بعد أربع ثوانٍ فقط إذا ما اشتغل
+       (متصفح تلفزيون قديم لا يفهم جافاسكربت الحديثة) بدل شاشة بيضاء صامتة -->
+  <div id="app"><div class="boot-note">
+    <strong>ما قدر التطبيق يشتغل على هذا المتصفح.</strong>
+    <span>جرّب متصفحًا أحدث، أو اعرض الشاشة من جوال أو لابتوب على التلفزيون.</span>
+  </div></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="config.js?v=26"></script>
-  <script src="seed.js" onerror="void 0"></script>
+  <!-- seed.js غير موجود في المستودع عمدًا؛ غيابه يظهر كخطأ 404 في السجل فقط -->
+  <script src="seed.js"></script>
   <script src="app.js?v=26"></script>
 </body>
 </html>
