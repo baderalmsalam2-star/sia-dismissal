@@ -1244,6 +1244,66 @@
           el('span', { class: 'muted' }, '(0 = أبدًا)')));
     }
 
+    // تحويل رموز الصفوف القديمة (G5A / «بنات G6») إلى الصيغة المعتمدة (BG5A / GG6)
+    function migrateCard() {
+      const isNew = (c) => /^[BG]G\d{1,2}[A-Za-z]?$/i.test(String(c || '').trim());
+      const girlsBuilding = (bid) => {
+        const b = bld(bid);
+        return /بنات|بنت/.test(`${b.name || ''} ${b.desc || ''}`);
+      };
+      const target = (s) => {
+        const c = String(s.c || '').trim();
+        if (!c || isNew(c)) return null;
+        const i = classInfo(c);
+        if (i.n == null) return null; // رعاية وما شابهها: لا رقم مرحلة، تُترك كما هي
+        return classCode({ n: i.n, sec: i.sec, girls: i.girls || girlsBuilding(s.b) });
+      };
+
+      const all = students();
+      const moves = new Map(); // "قديم→جديد" : عدد
+      let done = 0;
+      let kept = 0;
+      for (const s of all) {
+        const t = target(s);
+        if (!t) { isNew(s.c) ? done++ : kept++; continue; }
+        const key = `${s.c}\u0000${t}`;
+        moves.set(key, (moves.get(key) || 0) + 1);
+      }
+      const rows = [...moves.entries()].map(([k, n]) => {
+        const [from, to] = k.split('\u0000');
+        return { from, to, n };
+      }).sort((a, b) => cmpClass(a.to, b.to));
+      const total = rows.reduce((a, r) => a + r.n, 0);
+
+      return el('section', { class: 'card' },
+        el('h2', null, 'تحويل رموز الصفوف للصيغة الجديدة'),
+        el('p', { class: 'hint' }, 'الصيغة المعتمدة BG1A: بنين/بنات، ثم G، ثم المرحلة، ثم الشعبة. الفئة تُؤخذ من الرمز القديم أو من مبنى الطالب.'),
+        !total
+          ? el('p', { class: 'hint' }, done
+            ? `كل الرموز محوَّلة أصلًا (${done} طالب)${kept ? ` — و${kept} بلا رقم مرحلة (رعاية وغيرها) تبقى كما هي.` : ''}`
+            : 'ما فيه رموز قابلة للتحويل.')
+          : el('div', null,
+            el('div', { class: 'mig-list' }, rows.map((r) => el('div', { class: 'mig-row' },
+              el('span', { class: 'mig-from' }, r.from),
+              el('span', { class: 'mig-arrow' }, '←'),
+              el('b', { class: 'mig-to' }, r.to),
+              el('span', { class: 'muted' }, `${r.n} طالب`)))),
+            kept ? el('p', { class: 'hint' }, `و${kept} بلا رقم مرحلة (رعاية وغيرها) تبقى كما هي.`) : null,
+            el('button', {
+              class: 'btn primary big', type: 'button',
+              onclick: () => {
+                if (!confirm(`تحويل رموز ${total} طالب للصيغة الجديدة؟ تقدر تعدّل أي رمز بعدها يدويًا.`)) return;
+                const patch = {};
+                for (const s of all) {
+                  const t = target(s);
+                  if (t) patch[`${s.id}/c`] = t;
+                }
+                write('PATCH', 'students', patch);
+                toast(`تم تحويل ${total} رمز`, 'ok');
+              },
+            }, `حوّل ${total} رمز`)));
+    }
+
     function pinCard() {
       const cur = adminPin();
       const inp = el('input', {
@@ -1593,6 +1653,7 @@
         studentsCard(),
         linksCard(),
         settingsCard(),
+        migrateCard(),
         pinCard(),
         renameCard(),
         bulkCard(),
