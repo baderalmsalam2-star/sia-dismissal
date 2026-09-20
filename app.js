@@ -287,6 +287,32 @@
     window.addEventListener('storage', (e) => { if (e.key === LS_STATE) { loadLocal(); emit(); } });
   }
 
+  // ---------- التحديث الذاتي ----------
+  // التلفزيون يفتح الصفحة مرة واحدة ويبقى شهورًا، فرفع ?v= وحده لا يصله أبدًا.
+  // نسأل الخادم عن رقم النسخة، وإذا تغيّر: الشاشة تعيد تحميل نفسها (لا أحد عندها)،
+  // وبقية الصفحات تعرض زر تحديث حتى لا نقاطع أحدًا في منتصف النداء.
+  const APP_V = (() => {
+    const s = document.querySelector('script[src*="app.js"]');
+    const m = s && s.getAttribute('src').match(/[?&]v=([\w.]+)/);
+    return m ? m[1] : '';
+  })();
+  let updateSeen = false;
+  async function checkUpdate() {
+    if (!APP_V || updateSeen || !navigator.onLine) return;
+    try {
+      const r = await fetch(`index.html?_=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const m = (await r.text()).match(/app\.js\?v=([\w.]+)/);
+      if (!m || m[1] === APP_V) return;
+      updateSeen = true;
+      if (document.body.className === 'page-screen') location.reload();
+      else toast('فيه نسخة جديدة من الموقع', 'ok', { label: 'حدّث الآن', fn: () => location.reload() });
+    } catch { /* الشبكة، نعيد المحاولة لاحقًا */ }
+  }
+  setInterval(checkUpdate, 15 * 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
+  setTimeout(checkUpdate, 20000);
+
   // ---------- قراءة البيانات ----------
   const cmpText = (a, b) => String(a).localeCompare(String(b), 'ar', { numeric: true });
 
