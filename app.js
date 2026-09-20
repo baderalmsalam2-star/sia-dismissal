@@ -82,6 +82,23 @@
   const timeFmt = new Intl.DateTimeFormat('ar-KW-u-nu-arab', { hour: 'numeric', minute: '2-digit' });
   const dateFmt = new Intl.DateTimeFormat('ar-KW-u-nu-arab', { weekday: 'long', day: 'numeric', month: 'long' });
 
+  // أطول كلمة في الاسم تحدّد كم نصغّر الخط، حتى لا تنكسر «عبدالوهاب» إلى «عبدالوها/ب»
+  function longestWord(n) {
+    let longest = 0;
+    for (const w of String(n || '').trim().split(/\s+/)) longest = Math.max(longest, w.length);
+    return longest;
+  }
+  function fitName(n) {
+    const longest = longestWord(n);
+    return longest <= 6 ? 1 : Math.max(0.7, 6 / longest);
+  }
+
+  // عدّاد الانتظار بالدقائق والثواني — يبيّن للمسؤول كم صار للطالب واقفًا
+  function waited(t) {
+    const e = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    return arNum(`${Math.floor(e / 60)}:${String(e % 60).padStart(2, '0')}`);
+  }
+
   function ago(t) {
     const m = Math.floor((Date.now() - t) / 60000);
     if (m < 1) return 'الآن';
@@ -909,6 +926,12 @@
       clock.textContent = timeFmt.format(now);
       dateEl.textContent = dateFmt.format(now);
 
+      // العدّاد يمشي كل ثانية، لا كل إعادة رسم (كل 15 ثانية)
+      for (const card of cards.values()) {
+        const el2 = card.querySelector('.ago');
+        if (el2) el2.textContent = waited(Number(card.dataset.t));
+      }
+
       // بعد 90 ثانية انقطاع نصرّح بذلك بخط كبير بدل ترك شاشة متجمّدة تبدو سليمة
       if (status === 'ok') { lastOk = Date.now(); badSince = 0; }
       else if (!badSince) badSince = Date.now();
@@ -963,16 +986,21 @@
           if (!first) fresh = true;
         }
         card.querySelector('.card-name').textContent = arNum(s.n);
+        // نصغّر الخط للأسماء ذات الكلمات الطويلة بدل كسرها بنص الكلمة
+        card.style.setProperty('--fit', String(fitName(s.n)));
         card.querySelector('.badge').textContent = arNum(multiB ? `${s.c} · ${bldName(s.b)}` : s.c);
-        card.querySelector('.ago').textContent = ago(s.t);
+        card.querySelector('.ago').textContent = waited(s.t);
         card.style.order = String(i);
         card.classList.toggle('latest', i === 0 && Date.now() - s.t < 90000);
       });
       for (const [id, card] of cards) if (!seen.has(id)) { card.remove(); cards.delete(id); }
       const n = called.length;
-      // نتوقف عند 4 أعمدة: الأسماء الثلاثية والرباعية لا تُقرأ في عمود أضيق،
-      // والبقية يعرضها التدوير بدل أن نضغطها حتى تصير غير مقروءة
-      cardsWrap.style.setProperty('--cols', n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4);
+      // الأعمدة تتبع العدد، لكن الأسماء الطويلة (عبدالمحسن، عبدالوهاب) تحتاج
+      // عمودًا أعرض وإلا انكسرت بنص الكلمة — والبقية يعرضها التدوير
+      const maxWord = called.reduce((m, s) => Math.max(m, longestWord(s.n)), 0);
+      let cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;
+      if (maxWord >= 8) cols = Math.min(cols, 3);
+      cardsWrap.style.setProperty('--cols', cols);
       cardsWrap.hidden = n === 0;
       calledEmpty.hidden = n > 0;
 
