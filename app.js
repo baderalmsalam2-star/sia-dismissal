@@ -65,6 +65,11 @@
   // جهاز المسؤول: يُعلَّم عند فتح صفحة التوزيع، وعليه وحده يظهر زرها في الرئيسية
   const isAdmin = () => lsGet('km-admin') === '1';
 
+  // وجهة ثابتة لهذا الجهاز (للتلفزيونات): الرابط الواحد يفتحها مباشرة عند التشغيل
+  const homeTarget = () => { try { return JSON.parse(lsGet('km-home-target') || 'null'); } catch { return null; } };
+  const setHomeTarget = (t) => lsSet('km-home-target', t ? JSON.stringify(t) : null);
+  let autoOpened = false; // يفتح تلقائيًا مرة واحدة لكل تشغيل، حتى لا يحبس المستخدم
+
   const timeFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { hour: 'numeric', minute: '2-digit' });
   const dateFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -519,6 +524,36 @@
           el('p', null, 'قائمة الطلبة فاضية.'),
           el('a', { class: 'btn primary', href: link('manage') }, 'افتح التوزيع وعبّئ القائمة')));
       }
+      // هذا الجهاز مثبّت على شاشة معيّنة؟ نفتحها مع مهلة قصيرة للإلغاء
+      const t = homeTarget();
+      if (t) {
+        if (!autoOpened) {
+          autoOpened = true;
+          let n = 3;
+          const num = el('b', null, String(n));
+          const card = el('section', { class: 'card warn autogo' },
+            el('p', null, `جاري فتح ${t.label} خلال `, num, ' ثوانٍ…'),
+            el('button', {
+              class: 'btn', type: 'button',
+              onclick: () => { clearInterval(iv); card.remove(); render(); },
+            }, 'إلغاء — أبي أختار غيرها'));
+          const iv = setInterval(() => {
+            if (!document.body.contains(card)) { clearInterval(iv); return; }
+            n--;
+            num.textContent = String(n);
+            if (n <= 0) { clearInterval(iv); location.hash = link(t.v, { code: t.code }); }
+          }, 1000);
+          body.append(card);
+        } else {
+          body.append(el('section', { class: 'card' },
+            el('p', { class: 'hint' }, 'هذا الجهاز مثبّت على:'),
+            el('a', { class: 'btn primary big', href: link(t.v, { code: t.code }) }, t.label),
+            el('button', {
+              class: 'btn small ghost', type: 'button',
+              onclick: () => { setHomeTarget(null); toast('تم إلغاء التثبيت', 'ok'); render(); },
+            }, 'إلغاء التثبيت')));
+        }
+      }
       body.append(
         form,
         el('div', { class: 'screens' },
@@ -737,6 +772,26 @@
     }
     const backBtn = el('button', { class: 'scr-back', type: 'button', 'aria-label': 'رجوع للرئيسية', onclick: goBack },
       el('span', { class: 'back-i' }, '›'), el('span', null, 'رجوع'));
+
+    // تثبيت هذه الشاشة على الجهاز: بعدها الرابط الواحد يفتحها مباشرة
+    const pinBtn = el('button', { class: 'scr-pin', type: 'button' });
+    const pinned = () => { const t = homeTarget(); return !!t && t.v === 'screen' && t.code === code; };
+    const updPin = () => {
+      const on = pinned();
+      pinBtn.textContent = on ? '📌 شاشة هذا الجهاز' : '📌 ثبّتها على هذا الجهاز';
+      pinBtn.classList.toggle('on', on);
+      pinBtn.title = on
+        ? 'هذا الجهاز يفتح هذه الشاشة مباشرة — اضغط للإلغاء'
+        : 'خلّي الرابط الرئيسي يفتح هذه الشاشة مباشرة على هذا الجهاز';
+    };
+    pinBtn.addEventListener('click', () => {
+      if (pinned()) { setHomeTarget(null); toast('تم إلغاء التثبيت', 'ok'); }
+      else {
+        setHomeTarget({ v: 'screen', code, label: `شاشة ${(title.textContent || '').trim()}`.trim() });
+        toast('تم — الرابط الرئيسي يفتح هذه الشاشة على هذا الجهاز', 'ok');
+      }
+      updPin();
+    });
     const onKey = (e) => {
       if (e.key === 'Escape' && !document.fullscreenElement) goBack();
       else if (e.key === 'Backspace' && !/INPUT|TEXTAREA/.test((e.target || {}).tagName || '')) { e.preventDefault(); goBack(); }
@@ -751,6 +806,7 @@
         el('a', { class: 'scr-home', href: link('home'), title: 'تغيير الرمز' },
           el('img', { class: 'scr-logo', src: 'assets/logo.png', alt: 'الرئيسية' })),
         backBtn,
+        pinBtn,
         el('div', { class: 'scr-title' }, title, sub),
         undoBtn,
         stats,
@@ -772,9 +828,11 @@
       notFound.hidden = !!scope;
       body.hidden = !scope;
       stats.hidden = !scope;
+      pinBtn.hidden = !scope;
       if (!scope) { title.textContent = 'رمز غير معروف'; sub.textContent = ''; return; }
 
       title.textContent = scope.title;
+      updPin();
       sub.textContent = [scope.sub, CFG.schoolName].filter(Boolean).join(' · ');
       document.title = `${scope.title} · نداء الانصراف`;
 

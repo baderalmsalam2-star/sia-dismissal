@@ -318,6 +318,17 @@ body.page-screen {
 .scr-back[hidden], .scr-undo[hidden] { display: none; }
 .scr-undo { background: #8a5a12; border-color: #c88a2a; margin-inline-start: auto; }
 .scr-undo:hover { background: #a56c16; }
+.scr-pin {
+  flex: none; cursor: pointer; font-family: inherit; font-weight: 700; white-space: nowrap;
+  background: rgba(255,255,255,.1); color: #cfd2e6; border: 1px dashed rgba(255,255,255,.3);
+  border-radius: 12px; padding: 8px 12px; font-size: clamp(12px, 1vw, 20px);
+}
+.scr-pin:hover { background: rgba(255,255,255,.2); color: #fff; }
+.scr-pin.on { background: #1f7a4d; border-style: solid; border-color: #57d98f; color: #fff; }
+.scr-pin[hidden] { display: none; }
+.autogo { display: grid; gap: 10px; justify-items: start; }
+.autogo p { margin: 0; font-size: 1.05rem; }
+.autogo b { font-size: 1.3rem; }
 .scr-back .back-i { font-size: 1.4em; line-height: 1; margin-top: -.15em; }
 .scr-logo { width: 5.6vw; height: 5.6vw; min-width: 52px; min-height: 52px; object-fit: contain; background: #fff; border-radius: 50%; padding: .3vw; display: block; }
 .scr-title { flex: 1; min-width: 0; }
@@ -408,10 +419,11 @@ body.page-screen {
   .scr-logo { width: 48px; height: 48px; min-width: 0; min-height: 0; }
   .scr-home { order: 1; }
   .scr-back { order: 2; }
-  .scr-undo { order: 3; margin-inline-start: 0; }
-  .scr-time { order: 4; margin-inline-start: auto; }
-  .scr-title { order: 5; flex-basis: 100%; }
-  .scr-back, .scr-undo { padding: 7px 12px; font-size: 14px; }
+  .scr-pin { order: 3; }
+  .scr-undo { order: 4; margin-inline-start: 0; }
+  .scr-time { order: 5; margin-inline-start: auto; }
+  .scr-title { order: 6; flex-basis: 100%; }
+  .scr-back, .scr-undo, .scr-pin { padding: 7px 12px; font-size: 13px; }
   .stats { order: 6; width: 100%; gap: 8px; }
   .stat { flex: 1; border-radius: 10px; padding: 6px; }
   .scr-body { display: block; height: auto; padding: 12px 16px 90px; }
