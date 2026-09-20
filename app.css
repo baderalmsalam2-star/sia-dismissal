@@ -138,6 +138,10 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .code-row .btn { min-height: 54px; padding-inline: 22px; font-size: 1.05rem; }
 .code-err { color: var(--danger); margin: 8px 0 0; font-size: .9rem; min-height: 0; }
 .code-err:empty { display: none; }
+/* خياران عند التباس الرمز بين مبنى ومرحلة */
+.code-pick { display: grid; gap: 8px; margin-top: 10px; }
+.code-pick:empty { display: none; }
+.code-pick .btn { justify-content: space-between; }
 .tile {
   display: flex; align-items: center; gap: 14px; text-decoration: none; color: var(--ink);
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px;
@@ -245,6 +249,9 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .nt-meta:empty { display: none; }
 .nt.called { background: var(--wait-bg); border-color: var(--wait-line); }
 .nt.called .nt-meta { color: #9a5200; font-weight: 700; }
+/* المتأخر ما زال منتظرًا، لكن بلون ينبّه أن انتظاره طال */
+.nt.late { background: #fde8e6; border-color: #e7b3ae; }
+.nt.late .nt-meta { color: var(--danger); font-weight: 800; }
 .nt.out { background: var(--ok-bg); border-color: var(--ok-line); }
 .nt.out .nt-name { color: #0f5a35; }
 .nt.out .nt-meta { color: var(--ok); font-weight: 700; }
@@ -307,6 +314,7 @@ code { background: var(--teal-soft); padding: 2px 6px; border-radius: 6px; direc
 .rn-row.weak { background: var(--warn-bg); }
 .rn-row.none { background: #fdeaea; }
 .rn-new { font-weight: 700; overflow-wrap: anywhere; }
+.rn-tie { display: block; font-weight: 500; font-size: .8rem; color: var(--danger); }
 .rn-target { width: 100%; }
 
 @media (max-width: 640px) {
@@ -437,6 +445,8 @@ body.page-screen {
   color: var(--navy); font-weight: 800; font-variant-numeric: tabular-nums;
   font-size: calc(2.6vw / var(--cols) + 8px);
 }
+.page-screen .card.late { border-inline-start-color: var(--danger); }
+.page-screen .card.late .ago { color: var(--danger); }
 .page-screen .card.latest { box-shadow: 0 0 0 .3vw #ffb547, 0 .5vw 1.4vw rgba(0,0,0,.3); }
 .page-screen .card.fresh { animation: pop 1.1s ease-out, glow 2.2s ease-in-out 1.1s 3; }
 @keyframes pop { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }

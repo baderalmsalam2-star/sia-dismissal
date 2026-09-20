@@ -58,11 +58,14 @@
     const sameEnds = a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
     const covered = a.filter(has).length;
     if (covered < a.length && !sameEnds) return 0;
+    // 100 للتطابق الحرفي فقط. بدون هذا السقف كان الأخوان «عبدالله فهد المطيري»
+    // و«عبدالله سعد المطيري» يسجّلان 100 معًا أمام «عبدالله المطيري»، فيمرّان
+    // كمطابقة مؤكدة ويتبادلان الاسمين بلا أي تنبيه.
     if (a.join(' ') === b.join(' ')) return 100;
     let s = (covered / a.length) * 50;
     if (a[0] === b[0]) s += 25;
     if (a[a.length - 1] === b[b.length - 1]) s += 25;
-    return Math.round(s);
+    return Math.min(95, Math.round(s));
   }
 
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -281,6 +284,11 @@
     connect();
     // إذا انقطع البث بصمت (مهم للتلفزيونات) نعيد الاتصال
     setInterval(() => { if (Date.now() - lastBeat > 75000) { setStatus('off'); lastBeat = Date.now(); connect(); } }, 20000);
+    // المؤقّت وحده قد يتأخر 95 ثانية — وأكثر على جوال مقفل يخنق المؤقتات.
+    // رجوع الشبكة أو عودة الصفحة للواجهة إشارة مباشرة نعيد عندها الاتصال فورًا.
+    const wake = () => { if (Date.now() - lastBeat > 20000) { setStatus('off'); connect(); } };
+    window.addEventListener('online', wake);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
   } else {
     loadLocal();
     try { bc = new BroadcastChannel('km'); bc.onmessage = () => { loadLocal(); emit(); }; } catch { bc = null; }
@@ -370,12 +378,14 @@
   const isToday = (t) => new Date(t).toDateString() === new Date().toDateString();
 
   // حالة الطالب اليوم: none (لم يُنادَ) | called (وصل ولي الأمر) | out (خرج)
+  // الطالب الذي طالت مدة انتظاره يبقى `called` مع علم `late`. لا نختلق له وقت
+  // خروج: الاختلاق كان يمسحه من الشاشة ومن يد المسؤول وولي أمره ما زال واقفًا.
   function stateOf(id) {
     const c = (root.calls || {})[id];
     if (!c || typeof c.t !== 'number' || !isToday(c.t)) return { st: 'none' };
     if (typeof c.o === 'number') return { st: 'out', t: c.t, o: c.o };
     const m = minutes();
-    if (m > 0 && Date.now() - c.t > m * 60000) return { st: 'out', t: c.t, o: c.t + m * 60000, auto: true };
+    if (m > 0 && Date.now() - c.t > m * 60000) return { st: 'called', t: c.t, late: true };
     return { st: 'called', t: c.t };
   }
 
@@ -399,12 +409,18 @@
     const buildingByCode = (n) => buildings().find((b) => String(b.code || '').replace(/^0+/, '') === String(n));
     let m;
 
-    // رقم فقط ← رقم المبنى، وإذا ما فيه مبنى بهذا الرقم ← الصف
+    // رقم فقط ← رقم المبنى، وإذا ما فيه مبنى بهذا الرقم ← الصف.
+    // لكن «6» مثلًا رمز مبنى ورقم مرحلة معًا: لا نخمّن، نعرض الخيارين.
     if ((m = c.match(/^(?:مبني)?0*(\d{1,3})$/))) {
       const b = buildingByCode(m[1]);
-      if (b) return { title: b.name, sub: b.desc || '', ids: pick((s) => s.b === b.id), b: b.id };
       const n = Number(m[1]);
-      if (n >= 1 && n <= 12) return gradeScope(n, '', false, pick);
+      const grade = n >= 1 && n <= 12 ? gradeScope(n, '', false, pick) : null;
+      if (b) {
+        const bScope = { title: b.name, sub: b.desc || '', ids: pick((s) => s.b === b.id), b: b.id };
+        if (!grade) return bScope;
+        return { ambiguous: true, choices: [bScope, grade], codes: [String(m[1]), classCode({ n, sec: '', girls: false })] };
+      }
+      if (grade) return grade;
     }
     // الصيغة المعتمدة: BG1A بنين، GG1B بنات، وبدون حرف الشعبة تعني المرحلة كاملة.
     // تُفحص أولًا لأن «bg6» بالصيغة القديمة كانت تعني بنات الصف السادس والآن تعني بنينه.
@@ -430,6 +446,12 @@
     if (b) return { title: b.name, sub: b.desc || '', ids: pick((s) => s.b === b.id), b: b.id };
     return null;
   }
+  // من رابط مباشر لا يوجد من يختار عند الالتباس، فنُرجّح المبنى كما كانت الروابط تعمل
+  const resolveScope = (raw) => {
+    const r = resolveCode(raw);
+    return r && r.ambiguous ? r.choices[0] : r;
+  };
+
   function gradeScope(n, sec, girls, pick) {
     const ids = pick((s) => {
       const i = classInfo(s.c);
@@ -620,14 +642,28 @@
         location.hash = link('manage');
         return;
       }
-      if (ready && !resolveCode(v)) { err.textContent = 'ما لقينا مبنى أو صف بهذا الرمز'; input.select(); return; }
+      const scope = ready ? resolveCode(v) : true;
+      if (!scope) { err.textContent = 'ما لقينا مبنى أو صف بهذا الرمز'; input.select(); return; }
+      // رقم يصلح للمبنى وللمرحلة معًا: نسأل بدل أن نفتح الخطأ بصمت
+      if (scope !== true && scope.ambiguous) {
+        err.textContent = '';
+        pick.replaceChildren(
+          el('p', { class: 'hint' }, `«${arNum(v)}» يصلح للاثنين — أي وحدة تقصد؟`),
+          ...scope.choices.map((ch, i) => el('button', {
+            class: 'btn big', type: 'button',
+            onclick: () => { pick.replaceChildren(); lsSet('km-last-code', scope.codes[i]); location.hash = link('screen', { code: scope.codes[i] }); },
+          }, `${ch.title} — ${ch.ids.size} طالب`)));
+        return;
+      }
+      pick.replaceChildren();
       lsSet('km-last-code', v);
       location.hash = link('screen', { code: v });
     };
+    const pick = el('div', { class: 'code-pick' });
     return el('form', { class: 'code-form' + (big ? ' big' : ''), onsubmit: go },
       el('label', null, 'دخول المعلمين والشاشات'),
       el('div', { class: 'code-row' }, input, el('button', { class: 'btn primary', type: 'submit' }, 'دخول')),
-      err);
+      err, pick);
   }
 
   // ---------- الرئيسية ----------
@@ -795,7 +831,7 @@
     function render() {
       list.replaceChildren();
       if (!ready) { list.append(el('p', { class: 'empty-note' }, 'جاري التحميل…')); return; }
-      const scope = resolveCode(code);
+      const scope = resolveScope(code);
       if (!scope) {
         list.append(el('p', { class: 'empty-note' }, 'ما لقينا المبنى. ', el('a', { href: link('call') }, 'اختر المبنى')));
         return;
@@ -836,7 +872,7 @@
       }
 
       const tile = (s) => {
-        const meta = s.st === 'called' ? `⏳ ينتظر · ${ago(s.t)}`
+        const meta = s.st === 'called' ? `${s.late ? '⚠️ تأخّر' : '⏳ ينتظر'} · ${ago(s.t)}`
           : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
           : (onlyCalled || nq ? s.c : '');
         // الطالب المنادى لا يُعاد نداؤه بلمسة على اسمه — الإجراءان صريحان تحته
@@ -850,7 +886,7 @@
                 callStudent(s);
               },
             }, el('span', { class: 'nt-name' }, s.n), el('span', { class: 'nt-meta' }, meta));
-        return el('div', { class: 'nt ' + s.st }, head,
+        return el('div', { class: 'nt ' + s.st + (s.late ? ' late' : '') }, head,
           s.st === 'called'
             ? el('div', { class: 'nt-acts' },
                 el('button', {
@@ -934,15 +970,26 @@
       el('a', { class: 'btn primary big', href: link('home') }, 'رجوع وإدخال رمز ثاني'));
 
     let wakeLock = null;
-    const startBtn = el('button', {
-      class: 'start', type: 'button',
-      onclick: async () => {
-        chime();
-        try { await document.documentElement.requestFullscreen(); } catch { /* ignore */ }
-        try { wakeLock = await navigator.wakeLock.request('screen'); } catch { /* ignore */ }
-        startBtn.remove();
-      },
-    }, '🔊 اضغط لتشغيل الصوت وملء الشاشة');
+    // المتصفحات لا تسمح بالصوت ولا بملء الشاشة قبل تفاعل من المستخدم. كان ذلك
+    // معلّقًا بزر واحد لا أحد يضغطه على تلفزيون الموقف، فيبقى بلا صوت طوال اليوم.
+    // الآن أي ضغطة — حتى سهم في ريموت التلفزيون — تكفي، والزر يبقى دليلًا بصريًا.
+    const startBtn = el('button', { class: 'start', type: 'button' }, '🔊 اضغط لتشغيل الصوت وملء الشاشة');
+    let unlocked = false;
+    async function unlockScreen() {
+      if (unlocked) return;
+      unlocked = true;
+      chime();
+      try { await document.documentElement.requestFullscreen(); } catch { /* غير مدعوم */ }
+      await grabWakeLock();
+      startBtn.remove();
+    }
+    async function grabWakeLock() {
+      if (wakeLock || !navigator.wakeLock) return;
+      try { wakeLock = await navigator.wakeLock.request('screen'); } catch { /* غير مدعوم */ }
+    }
+    startBtn.addEventListener('click', unlockScreen);
+    document.addEventListener('pointerdown', unlockScreen, { once: true });
+    document.addEventListener('keydown', unlockScreen, { once: true });
 
     // الرجوع: نخرج من ملء الشاشة أولًا وإلا ما يبين زر الرجوع في المتصفح
     async function goBack() {
@@ -1023,7 +1070,7 @@
 
     function render() {
       if (!ready) { title.textContent = 'جاري التحميل…'; return; }
-      const scope = code ? resolveCode(code) : { title: 'كل المباني', sub: '', ids: new Set(students().map((s) => s.id)) };
+      const scope = code ? resolveScope(code) : { title: 'كل المباني', sub: '', ids: new Set(students().map((s) => s.id)) };
       notFound.hidden = !!scope;
       body.hidden = !scope;
       stats.hidden = !scope;
@@ -1062,7 +1109,9 @@
           card.addEventListener('click', () => markOut(root.students[s.id] ? { id: s.id, ...root.students[s.id] } : s));
           cards.set(s.id, card);
           cardsWrap.append(card);
-          if (!first) fresh = true;
+          // الجرس للنداءات الحقيقية فقط. البطاقة قد يُعاد بناؤها لأسباب أخرى
+          // (تغيير إعداد، عودة اتصال) فلا يصح أن تُطلق الجرس على كل التلفزيونات.
+          if (!first && Date.now() - s.t < 90000) fresh = true;
         }
         card.querySelector('.card-name').textContent = arNum(s.n);
         // نصغّر الخط للأسماء ذات الكلمات الطويلة بدل كسرها بنص الكلمة
@@ -1071,6 +1120,7 @@
         card.querySelector('.ago').textContent = waited(s.t);
         card.style.order = String(i);
         card.classList.toggle('latest', i === 0 && Date.now() - s.t < 90000);
+        card.classList.toggle('late', !!s.late);
       });
       for (const [id, card] of cards) if (!seen.has(id)) { card.remove(); cards.delete(id); }
       const n = called.length;
@@ -1108,11 +1158,9 @@
       setTimeout(markMore, 0); // بعد ما يستقر التخطيط
     }
 
-    const onVis = async () => {
-      if (document.visibilityState === 'visible' && wakeLock !== null) {
-        try { wakeLock = await navigator.wakeLock.request('screen'); } catch { /* ignore */ }
-      }
-    };
+    // wakeLock يسقط عند نوم الشاشة، ونعيد طلبه عند العودة. الشرط القديم
+    // (wakeLock !== null) كان يمنع المحاولة الثانية متى فشلت الأولى.
+    const onVis = () => { if (document.visibilityState === 'visible' && unlocked) grabWakeLock(); };
     document.addEventListener('visibilitychange', onVis);
 
     // لو ضاقت الشاشة عن كل المنتظرين، ندوّر العرض ببطء بدل إخفاء الأقدم إلى الأبد.
@@ -1138,6 +1186,9 @@
     const t2 = setInterval(render, 15000);
     const t4 = setInterval(cycleCards, 5000);
     cleanup = () => {
+      try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch { /* ignore */ }
+      document.removeEventListener('pointerdown', unlockScreen);
+      document.removeEventListener('keydown', unlockScreen);
       clearInterval(t1);
       clearInterval(t2);
       clearInterval(t4);
@@ -1259,9 +1310,9 @@
 
     function settingsCard() {
       return el('section', { class: 'card' },
-        el('h2', null, 'الخروج التلقائي'),
+        el('h2', null, 'تنبيه الانتظار الطويل'),
         el('div', { class: 'inline wrap' },
-          el('span', null, 'إذا ما أحد ضغط "خرج"، يُعتبر الطالب خارج بعد'),
+          el('span', null, 'إذا ما أحد ضغط "خرج"، يُعلَّم الطالب متأخرًا بعد'),
           el('input', {
             type: 'number', min: '0', max: '180', value: String(minutes()), class: 'num', 'aria-label': 'الدقائق',
             onchange: (e) => write('PATCH', 'settings', { minutes: Math.max(0, Number(e.target.value) || 0) }),
@@ -1516,19 +1567,38 @@
         if (!pool.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه طلبة في هذا النطاق.')); return; }
         reviewing = true;
 
-        // نجمع كل الاحتمالات ونوزّعها من الأقوى للأضعف حتى ما يتكرر طالب
+        // نجمع كل الاحتمالات ونوزّعها من الأقوى للأضعف حتى ما يتكرر طالب.
+        // الصف المكتوب في السطر أقوى فاصل بين الإخوة، فنعاقب اختلافه قبل التوزيع.
         const pairs = [];
         lines.forEach((ln, li) => {
           pool.forEach((st) => {
-            const sc = nameScore(nameWords(st.n), ln.w);
+            let sc = nameScore(nameWords(st.n), ln.w);
+            if (!sc) return;
+            if (ln.cls && st.c && norm(ln.cls) !== norm(st.c)) sc -= 30;
             if (sc >= 60) pairs.push({ li, id: st.id, sc });
           });
         });
         pairs.sort((a, b) => b.sc - a.sc);
+        // التعادل غموض لا مطابقة، وله وجهان: مرشّحان لسطر واحد، أو سطران لطالب
+        // واحد (أخوان بنفس الاسم الأول والعائلة). كلاهما يُترك للاختيار اليدوي.
+        const bestLine = new Map();
+        const bestStu = new Map();
+        for (const p of pairs) {
+          const L = bestLine.get(p.li);
+          if (!L || p.sc > L.sc) bestLine.set(p.li, { sc: p.sc, ties: 1 });
+          else if (p.sc === L.sc) L.ties++;
+          const S = bestStu.get(p.id);
+          if (!S || p.sc > S.sc) bestStu.set(p.id, { sc: p.sc, ties: 1 });
+          else if (p.sc === S.sc) S.ties++;
+        }
         const takenLine = new Set();
         const takenStu = new Set();
         for (const p of pairs) {
           if (takenLine.has(p.li) || takenStu.has(p.id)) continue;
+          const L = bestLine.get(p.li);
+          const S = bestStu.get(p.id);
+          const tie = (L && L.ties > 1 && p.sc === L.sc) || (S && S.ties > 1 && p.sc === S.sc);
+          if (tie && p.sc < 100) { takenLine.add(p.li); lines[p.li].tie = true; continue; }
           takenLine.add(p.li);
           takenStu.add(p.id);
           lines[p.li].id = p.id;
@@ -1537,8 +1607,10 @@
 
         const rows = lines.map((ln) => {
           const sel = targetSelect(ln.id || '', pool, byId);
+          sel.addEventListener('change', () => { ln.manual = true; });
           const cls = ln.id ? (ln.sc >= 85 ? '' : ' weak') : ' none';
-          return { ln, sel, node: el('div', { class: 'rn-row' + cls }, el('span', { class: 'rn-new' }, ln.name), sel) };
+          const note = ln.tie ? el('span', { class: 'rn-tie' }, 'أكثر من طالب يطابق — اختر يدويًا') : null;
+          return { ln, sel, node: el('div', { class: 'rn-row' + cls }, el('span', { class: 'rn-new' }, ln.name, note), sel) };
         });
         const matched = lines.filter((l) => l.id).length;
         const missed = pool.filter((s) => !takenStu.has(s.id));
@@ -1546,6 +1618,7 @@
         out.replaceChildren(
           el('div', { class: 'rn-sum' },
             el('span', null, `تطابق ${matched} من ${lines.length}`),
+            lines.filter((l) => l.tie).length ? el('span', { class: 'bad' }, `${lines.filter((l) => l.tie).length} تحتاج اختيارًا يدويًا`) : null,
             lines.length - matched ? el('span', { class: 'bad' }, `${lines.length - matched} بدون مقابل`) : null,
             missed.length ? el('span', { class: 'muted' }, `${missed.length} طالب ما وصلهم تحديث`) : null),
           el('div', { class: 'rn-out' }, rows.map((r) => r.node)),
@@ -1562,7 +1635,8 @@
                 if (used.has(id)) { dup++; continue; }
                 used.add(id);
                 if (byId[id].n !== r.ln.name) { patch[`${id}/n`] = r.ln.name; n++; }
-                if (r.ln.cls && byId[id].c !== r.ln.cls) patch[`${id}/c`] = r.ln.cls;
+                // نقل الصف على مطابقة ظنّية ينقل الطالب لصف غلط، فنشترط اليقين
+                if (r.ln.cls && byId[id].c !== r.ln.cls && (r.ln.manual || r.ln.sc === 100)) patch[`${id}/c`] = r.ln.cls;
               }
               if (dup) { toast(`${dup} أسماء مربوطة بنفس الطالب — صحّحها أولًا`, 'err'); return; }
               if (!Object.keys(patch).length) { toast('ما فيه تغيير'); return; }
