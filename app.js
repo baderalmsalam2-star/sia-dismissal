@@ -149,7 +149,11 @@
   function emit() {
     if (emitQueued) return;
     emitQueued = true;
-    setTimeout(() => { emitQueued = false; subs.forEach((f) => f()); }, 0);
+    setTimeout(() => {
+      emitQueued = false;
+      // خطأ في مشترك واحد كان يوقف بقية الصفحة عن التحديث
+      subs.forEach((f) => { try { f(); } catch { /* نكمل البقية */ } });
+    }, 0);
   }
   function setStatus(s) { if (status !== s) { status = s; emit(); } }
 
@@ -240,26 +244,35 @@
   let lastBeat = Date.now();
   function connect() {
     if (es) es.close();
-    es = new EventSource(`${DB}/schools/${encodeURIComponent(KEY)}.json`);
-    const beat = () => { lastBeat = Date.now(); };
-    es.onopen = () => { beat(); setStatus(ready ? 'ok' : 'connecting'); };
-    es.addEventListener('put', (e) => {
+    // المعالجات تُغلق على `cur` لا على `es` المتحوّل: بث قديم كان يقلب حالة
+    // البث الجديد إلى «غير متصل» بعد أن استبدلناه.
+    const cur = new EventSource(`${DB}/schools/${encodeURIComponent(KEY)}.json`);
+    es = cur;
+    const mine = () => cur === es;
+    const beat = () => { if (mine()) lastBeat = Date.now(); };
+    cur.onopen = () => { beat(); if (mine()) setStatus(ready ? 'ok' : 'connecting'); };
+    cur.addEventListener('put', (e) => {
+      if (!mine()) return;
       beat();
-      const m = JSON.parse(e.data);
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
       setAt(m.path, m.data);
       ready = true;
       setStatus('ok');
       emit();
     });
-    es.addEventListener('patch', (e) => {
+    cur.addEventListener('patch', (e) => {
+      if (!mine()) return;
       beat();
-      const m = JSON.parse(e.data);
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
       for (const [k, v] of Object.entries(m.data || {})) setAt(m.path.replace(/\/$/, '') + '/' + k, v);
       emit();
     });
-    es.addEventListener('keep-alive', () => { beat(); if (ready) setStatus('ok'); });
-    es.addEventListener('cancel', () => setStatus('denied'));
-    es.onerror = () => { if (es.readyState !== 1) setStatus('off'); };
+    cur.addEventListener('keep-alive', () => { beat(); if (mine() && ready) setStatus('ok'); });
+    // رمز غير صالح: نغلق المصدر وإلا أعاد المتصفح المحاولة إلى الأبد
+    cur.addEventListener('cancel', () => { setStatus('denied'); cur.close(); if (mine()) es = null; });
+    cur.onerror = () => { if (mine() && cur.readyState !== 1) setStatus('off'); };
   }
 
   // الوضع التجريبي: البيانات محفوظة على هذا الجهاز وتتزامن بين تبويبات المتصفح نفسه
@@ -590,13 +603,22 @@
     return d;
   }
 
+  // نقيس ارتفاع الشريط الفعلي (يتغيّر مع النتوء ومع التفاف العنوان)
+  function measureBar(bar) {
+    const set = () => document.documentElement.style.setProperty('--bar-h', Math.round(bar.getBoundingClientRect().height) + 'px');
+    set();
+    try { new ResizeObserver(set).observe(bar); } catch { window.addEventListener('resize', set); }
+  }
+
   function topbar(title, withBack = true) {
-    return el('header', { class: 'topbar' },
+    const bar = el('header', { class: 'topbar' },
       withBack ? el('a', { class: 'back', href: link('home'), 'aria-label': 'رجوع للرئيسية' },
         el('span', { class: 'back-i' }, '›'), el('span', { class: 'back-t' }, 'رجوع')) : null,
       el('img', { class: 'topbar-logo', src: 'assets/icon-192.png', alt: '' }),
       el('div', { class: 'topbar-title' }, el('strong', null, title), el('small', null, CFG.schoolName || '')),
       statusPill());
+    setTimeout(() => measureBar(bar), 0);
+    return bar;
   }
 
   function localBanner() {
@@ -812,7 +834,12 @@
       class: 'search-clear', type: 'button', 'aria-label': 'مسح البحث',
       onclick: () => { search.value = ''; q = ''; render(); search.focus(); },
     }, '×');
-    search.addEventListener('input', () => { q = search.value; render(); });
+    // إعادة الرسم مع كل حرف تُقفز التخطيط وتُبطئ على 158 اسمًا
+    let searchTimer = null;
+    search.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { q = search.value; render(); }, 120);
+    });
 
     const bar = topbar('النداء');
     const titleEl = bar.querySelector('.topbar-title strong');
@@ -858,7 +885,8 @@
 
       // أزرار الانتقال السريع للصفوف
       const classes = [...new Set(rows.map((s) => s.c))].sort(cmpClass);
-      jump.replaceChildren(...(onlyCalled ? [] : classes.map((c) => el('button', {
+      const jumpClasses = [...new Set(all.map((s) => s.c))].sort(cmpClass);
+      jump.replaceChildren(...(onlyCalled ? [] : jumpClasses.map((c) => el('button', {
         class: 'tab', type: 'button',
         onclick: () => {
           const h = list.querySelector(`[data-class="${CSS.escape(c)}"]`);
@@ -913,18 +941,52 @@
       }
     }
 
-    subs.add(render);
+    // إعادة الرسم تحت الإصبع تسرق الضغطة أو تنقلها لاسم ثانٍ، فنؤجّلها
+    let touching = false;
+    let pendingRender = false;
+    let touchGuard = null;
+    const endTouch = () => {
+      clearTimeout(touchGuard);
+      touching = false;
+      // نؤجّل قليلًا بعد رفع الإصبع: حدث click يصل بعد pointerup، ولو أعدنا
+      // البناء فورًا وصل الحدث لعنصر مفصول من الصفحة فضاعت الضغطة
+      if (pendingRender) {
+        pendingRender = false;
+        setTimeout(() => { if (touching) { pendingRender = true; return; } render(); }, 150);
+      }
+    };
+    const onDown = () => {
+      touching = true;
+      clearTimeout(touchGuard);
+      touchGuard = setTimeout(endTouch, 1000); // حارس: pointercancel قد لا يصل
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('pointerup', endTouch);
+    document.addEventListener('pointercancel', endTouch);
+    const safeRender = () => { if (touching) { pendingRender = true; return; } render(); };
+
+    subs.add(safeRender);
     render();
-    const iv = setInterval(render, 30000);
-    cleanup = () => { clearInterval(iv); pad.dispose(); };
+    const iv = setInterval(safeRender, 30000);
+    cleanup = () => {
+      clearInterval(iv);
+      clearTimeout(touchGuard);
+      clearTimeout(searchTimer);
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('pointerup', endTouch);
+      document.removeEventListener('pointercancel', endTouch);
+      pad.dispose();
+    };
   }
 
   // ---------- صفحة المبنى / الصف (التلفزيون أو جوال المعلمة) ----------
   let actx = null;
   function chime() {
     try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      if (actx.state === 'suspended') actx.resume();
+      // بلا سياق شغّال لا صوت — وإنشاء مذبذبات على سياق معلّق يكدّسها حتى
+      // تنفجر كلها دفعة واحدة عند أول استئناف
+      if (!actx) return;
+      if (actx.state !== 'running') { actx.resume().catch(() => {}); return; }
       const t0 = actx.currentTime;
       [[784, 0], [1047, 0.2]].forEach(([f, d]) => {
         const o = actx.createOscillator();
@@ -937,6 +999,7 @@
         o.connect(g).connect(actx.destination);
         o.start(t0 + d);
         o.stop(t0 + d + 0.75);
+        o.onended = () => { try { o.disconnect(); g.disconnect(); } catch { /* ignore */ } };
       });
     } catch { /* الصوت غير متاح */ }
   }
@@ -978,6 +1041,7 @@
     async function unlockScreen() {
       if (unlocked) return;
       unlocked = true;
+      try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); } catch { /* غير مدعوم */ }
       chime();
       try { await document.documentElement.requestFullscreen(); } catch { /* غير مدعوم */ }
       await grabWakeLock();
@@ -1141,6 +1205,7 @@
         groups.get(g).push(s);
       }
       const rank = { called: 0, none: 1, out: 2 };
+      const rosterTop = roster.scrollTop;
       roster.replaceChildren(...[...groups.keys()].sort(cmpClass).map((g) => {
         const items = groups.get(g).sort((a, b) => rank[a.st] - rank[b.st] || cmpText(a.n, b.n));
         const outN = items.filter((s) => s.st === 'out').length;
@@ -1152,6 +1217,8 @@
             onclick: s.st === 'called' ? () => markOut({ id: s.id, ...root.students[s.id] }) : null,
           }, s.st === 'out' ? '✓ ' : '', s.n))));
       }));
+
+      roster.scrollTop = rosterTop;
 
       if (fresh) chime();
       first = false;
@@ -1165,6 +1232,14 @@
 
     // لو ضاقت الشاشة عن كل المنتظرين، ندوّر العرض ببطء بدل إخفاء الأقدم إلى الأبد.
     // التلفزيون ما عنده من يمرّر، فالتدوير هو الطريقة الوحيدة ليظهر الجميع.
+    // الصفوف تحت الطيّ لا يصلها أحد على تلفزيون بلا من يمرّر، فندوّرها ببطء
+    function cycleRoster() {
+      const over = roster.scrollHeight - roster.clientHeight;
+      if (over <= 4) { roster.scrollTop = 0; return; }
+      const atEnd = roster.scrollTop >= over - 4;
+      roster.scrollTo({ top: atEnd ? 0 : Math.min(roster.scrollTop + roster.clientHeight * 0.9, over), behavior: 'smooth' });
+    }
+
     function markMore() {
       cardsWrap.classList.toggle('more', cardsWrap.scrollHeight - cardsWrap.clientHeight > 4);
     }
@@ -1185,6 +1260,7 @@
     const t1 = setInterval(tick, 1000);
     const t2 = setInterval(render, 15000);
     const t4 = setInterval(cycleCards, 5000);
+    const t5 = setInterval(cycleRoster, 10000);
     cleanup = () => {
       try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch { /* ignore */ }
       document.removeEventListener('pointerdown', unlockScreen);
@@ -1192,6 +1268,7 @@
       clearInterval(t1);
       clearInterval(t2);
       clearInterval(t4);
+      clearInterval(t5);
       document.removeEventListener('visibilitychange', onVis);
       document.removeEventListener('keydown', onKey);
       pad.dispose();
