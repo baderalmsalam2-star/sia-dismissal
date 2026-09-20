@@ -132,7 +132,8 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .code-form { background: var(--card); border: 2px solid var(--teal); border-radius: var(--radius); padding: 16px; }
 .code-form label { display: block; font-weight: 800; color: var(--navy); margin-bottom: 8px; font-size: 1.05rem; }
 .code-row { display: flex; gap: 8px; }
-.code-input { flex: 1; font-size: 1.25rem; min-height: 54px; text-align: center; font-weight: 700; }
+/* width:0 مع flex-grow حتى لا يفرض الحقل عرضه الافتراضي على الصفحة كلها */
+.code-input { flex: 1 1 0; width: 0; min-width: 0; font-size: 1.25rem; min-height: 54px; text-align: center; font-weight: 700; }
 .code-row .btn { min-height: 54px; padding-inline: 22px; font-size: 1.05rem; }
 .code-err { color: var(--danger); margin: 8px 0 0; font-size: .9rem; min-height: 0; }
 .code-err:empty { display: none; }

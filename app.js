@@ -62,6 +62,9 @@
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* ignore */ } };
 
+  // جهاز المسؤول: يُعلَّم عند فتح صفحة التوزيع، وعليه وحده يظهر زرها في الرئيسية
+  const isAdmin = () => lsGet('km-admin') === '1';
+
   const timeFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { hour: 'numeric', minute: '2-digit' });
   const dateFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -517,9 +520,10 @@
         el('a', { class: 'tile tile-call', href: link('call') },
           el('span', { class: 'tile-icon', 'aria-hidden': 'true' }, '📣'),
           el('span', null, el('strong', null, 'النداء — المواقف'), el('small', null, 'للمسؤول عند كل مبنى: اضغط على اسم الطالب فيظهر على شاشة المبنى'))),
-        el('a', { class: 'tile', href: link('manage') },
+        // التوزيع يظهر فقط على جهاز المسؤول (اللي فتح صفحة التوزيع مرة من رابطها المباشر)
+        isAdmin() ? el('a', { class: 'tile', href: link('manage') },
           el('span', { class: 'tile-icon', 'aria-hidden': 'true' }, '🗂️'),
-          el('span', null, el('strong', null, 'التوزيع والإعدادات'), el('small', null, 'نقل الطلبة بين المباني، الإضافة والحذف، الروابط'))),
+          el('span', null, el('strong', null, 'التوزيع والإعدادات'), el('small', null, 'نقل الطلبة بين المباني، الإضافة والحذف، الروابط'))) : '',
       );
     }
     subs.add(render);
@@ -847,6 +851,7 @@
   // ---------- التوزيع والإعدادات ----------
   function viewManage() {
     document.body.className = 'page-manage';
+    lsSet('km-admin', '1');
     const body = el('main', { class: 'manage' });
     const pad = scrollPad();
     app.append(topbar('التوزيع والإعدادات'), localBanner(), body, pad);
@@ -880,7 +885,9 @@
         el('p', { class: 'hint' }, REMOTE
           ? 'كل رابط فيه رمز المدرسة. أرسل رابط الصفحة الرئيسية للمعلمات، وكل وحدة تكتب رمز مبناها أو صفها.'
           : 'الروابط تشتغل الحين على هذا الجهاز فقط (وضع تجريبي).'),
+        el('p', { class: 'hint' }, '⚠️ رابط التوزيع خاصّ بك — لا ترسله لأحد. زرّه مخفي عن الصفحة الرئيسية ويظهر فقط على الأجهزة اللي فتحته من قبل.'),
         row('🏠 الصفحة الرئيسية (للمعلمات)', absLink('home')),
+        row('🗂️ التوزيع والإعدادات (خاص بك)', absLink('manage')),
         buildings().map((b) => [
           row(`📣 نداء ${b.name} (المواقف)`, absLink('call', { code: b.code || b.name })),
           row(`🖥️ شاشة ${b.name} — الرمز ${b.code || '—'}`, absLink('screen', { code: b.code || b.name })),
@@ -1201,7 +1208,17 @@
               write('PUT', '', JSON.parse(JSON.stringify(window.SEED)));
               toast('تمت تعبئة القائمة الأولية', 'ok');
             },
-          }, 'استرجاع القائمة الأولية') : null),
+          }, 'استرجاع القائمة الأولية') : null,
+          el('button', {
+            class: 'btn', type: 'button',
+            title: 'يخفي زر التوزيع من الصفحة الرئيسية على هذا الجهاز',
+            onclick: () => {
+              if (!confirm('إخفاء زر التوزيع من الصفحة الرئيسية على هذا الجهاز؟ تقدر ترجع له دائمًا برابط التوزيع المباشر.')) return;
+              lsSet('km-admin', null);
+              toast('تم الإخفاء من هذا الجهاز', 'ok');
+              location.hash = link('home');
+            },
+          }, 'أخفِ زر التوزيع من هذا الجهاز')),
         el('p', { class: 'hint' }, 'النداءات تتصفّر تلقائيًا كل يوم جديد.'),
         REMOTE ? el('p', { class: 'hint' }, 'رمز المدرسة: ', el('code', null, KEY)) : null);
     }
