@@ -87,13 +87,17 @@
   let P = hashParams();
   const KEY = P.get('k') || lsGet('km-key') || '';
   if (P.get('k')) lsSet('km-key', KEY);
-  const DB = (P.get('db') || CFG.dbUrl || '').replace(/\/+$/, '');
+  // وسيط db يُقبل أثناء التجربة على الجهاز فقط. على الإنترنت يُتجاهل: وإلا كفى رابط
+  // واحد فيه db=قاعدة-المهاجم ليُرسل له رمز المدرسة وكل الأسماء بمجرد فتح الصفحة.
+  const ONDEV = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const dbParam = ONDEV ? P.get('db') : '';
+  const DB = (dbParam || CFG.dbUrl || '').replace(/\/+$/, '');
   const REMOTE = !!(DB && KEY);
 
   function link(v, extra) {
     const p = new URLSearchParams();
     if (KEY) p.set('k', KEY);
-    if (P.get('db')) p.set('db', P.get('db'));
+    if (dbParam) p.set('db', dbParam);
     if (v && v !== 'home') p.set('v', v);
     for (const [k, val] of Object.entries(extra || {})) p.set(k, val);
     return '#' + p.toString();
@@ -120,8 +124,17 @@
   }
   function setStatus(s) { if (status !== s) { status = s; emit(); } }
 
+  // رابط آمن للعرض: https فقط، حتى لا يتحوّل حقل الخريطة إلى منفّذ أكواد
+  function safeUrl(u) {
+    try { return new URL(String(u || '')).protocol === 'https:' ? String(u) : ''; }
+    catch { return ''; }
+  }
+
+  // مفاتيح تفسد الكائنات لو وصلت من مسار في قاعدة البيانات
+  const BAD_KEY = new Set(['__proto__', 'prototype', 'constructor']);
   function setAt(path, val) {
     const parts = String(path || '').split('/').filter(Boolean);
+    if (parts.some((p) => BAD_KEY.has(p))) return;
     if (!parts.length) { root = (val && typeof val === 'object') ? val : {}; return; }
     let o = root;
     for (let i = 0; i < parts.length - 1; i++) {
@@ -593,7 +606,7 @@
             el('div', { class: 'b-actions' },
               el('a', { class: 'btn small primary', href: link('call', { code: b.code || b.name }) }, '📣 النداء'),
               el('a', { class: 'btn small', href: link('screen', { code: b.code || b.name }) }, '🖥️ الشاشة')),
-            b.map ?el('a', { class: 'map-link', href: b.map, target: '_blank', rel: 'noopener' }, '📍 ', b.addr || 'الموقع') : null))),
+            safeUrl(b.map) ? el('a', { class: 'map-link', href: safeUrl(b.map), target: '_blank', rel: 'noopener' }, '📍 ', b.addr || 'الموقع') : null))),
         el('a', { class: 'tile tile-call', href: link('call') },
           el('span', { class: 'tile-icon', 'aria-hidden': 'true' }, '📣'),
           el('span', null, el('strong', null, 'النداء — المواقف'), el('small', null, 'للمسؤول عند كل مبنى: اضغط على اسم الطالب فيظهر على شاشة المبنى'))),
@@ -1041,12 +1054,12 @@
                 'aria-label': `رابط خريطة ${b.name}`, inputmode: 'url',
                 onchange: (e) => {
                   const v = e.target.value.trim();
-                  if (v && !/^https?:\/\//i.test(v)) { toast('الرابط لازم يبدأ بـ https', 'err'); return; }
+                  if (v && !/^https:\/\//i.test(v)) { toast('الرابط لازم يبدأ بـ https://', 'err'); return; }
                   write('PATCH', `buildings/${b.id}`, { map: v });
                   toast(v ? `تم حفظ موقع ${b.name}` : `تم مسح موقع ${b.name}`, 'ok');
                 },
               }),
-              b.map ? el('a', { class: 'btn small', href: b.map, target: '_blank', rel: 'noopener' }, 'جرّب الرابط') : null)));
+              safeUrl(b.map) ? el('a', { class: 'btn small', href: safeUrl(b.map), target: '_blank', rel: 'noopener' }, 'جرّب الرابط') : null)));
         }),
         el('button', {
           class: 'btn', type: 'button',
@@ -1350,7 +1363,17 @@
               toast('تم الإخفاء من هذا الجهاز', 'ok');
               location.hash = link('home');
             },
-          }, 'أخفِ زر التوزيع من هذا الجهاز')),
+          }, 'أخفِ زر التوزيع من هذا الجهاز'),
+          el('button', {
+            class: 'btn ghost danger', type: 'button',
+            title: 'يمسح رمز المدرسة من هذا الجهاز — استخدمه قبل ما تعطي الجهاز لأحد',
+            onclick: async () => {
+              if (!confirm('نسيان المدرسة من هذا الجهاز؟ بعدها ما يفتح شي إلا برابط المدرسة من جديد.')) return;
+              for (const k of ['km-key', 'km-admin', 'km-unlock', 'km-home-target', 'km-mb', 'km-last-code', 'km-call-code', 'km-local-state-v2']) lsSet(k, null);
+              try { if (document.fullscreenElement) await document.exitFullscreen(); } catch { /* ignore */ }
+              location.href = location.href.split('#')[0];
+            },
+          }, 'انسَ المدرسة من هذا الجهاز')),
         el('p', { class: 'hint' }, 'النداءات تتصفّر تلقائيًا كل يوم جديد.'),
         REMOTE ? el('p', { class: 'hint' }, 'رمز المدرسة: ', el('code', null, KEY)) : null);
     }
