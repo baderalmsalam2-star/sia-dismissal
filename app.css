@@ -50,7 +50,8 @@ a { color: var(--navy); }
   padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
   background: var(--navy); color: #fff;
 }
-.topbar-logo { width: 40px; height: 40px; object-fit: contain; background: #fff; border-radius: 50%; padding: 2px; }
+/* مربّع بزوايا دائرية لا دائرة: الشعار عريض والدائرة تقصّ الـ"20" */
+.topbar-logo { width: 42px; height: 42px; object-fit: contain; background: #fff; border-radius: 10px; padding: 3px; }
 .topbar-title { display: flex; flex-direction: column; line-height: 1.2; flex: 1; min-width: 0; }
 .topbar-title strong { font-size: 1.05rem; font-weight: 800; }
 .topbar-title small { color: var(--teal); font-size: .78rem; }
@@ -335,7 +336,7 @@ body.page-screen {
 .autogo p { margin: 0; font-size: 1.05rem; }
 .autogo b { font-size: 1.3rem; }
 .scr-back .back-i { font-size: 1.4em; line-height: 1; margin-top: -.15em; }
-.scr-logo { width: 5.6vw; height: 5.6vw; min-width: 52px; min-height: 52px; object-fit: contain; background: #fff; border-radius: 50%; padding: .3vw; display: block; }
+.scr-logo { width: 5.6vw; height: 5.6vw; min-width: 52px; min-height: 52px; object-fit: contain; background: #fff; border-radius: 12px; padding: .35vw; display: block; }
 .scr-title { flex: 1; min-width: 0; }
 .scr-title h1 { margin: 0; font-size: clamp(22px, 3vw, 64px); font-weight: 800; line-height: 1.15; }
 .scr-title small { color: var(--teal); font-size: clamp(12px, 1.15vw, 24px); }
@@ -408,7 +409,7 @@ body.page-screen {
 @keyframes blink { 50% { box-shadow: 0 0 0 .3vw rgba(255,181,71,.45); } }
 
 .scr-msg { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; text-align: center; padding: 16px; }
-.scr-msg img { width: 160px; background: #fff; border-radius: 50%; padding: 6px; }
+.scr-msg img { width: 180px; background: #fff; border-radius: 18px; padding: 8px; }
 .scr-msg p { font-size: clamp(18px, 2vw, 36px); margin: 0; }
 
 .start {
