@@ -890,7 +890,29 @@
     const jump = el('nav', { class: 'tabs', 'aria-label': 'الصفوف' });
     const summary = el('div', { class: 'summary' });
     const list = el('main', { class: 'call-list' });
-    const undoRow = el('div', { class: 'undo-row' }, undoButton('btn undo-btn'),
+    // تثبيت النداء مثل تثبيت الشاشة: جوال المسؤول في الموقف يفتح مبناه مباشرة
+    const pinBtn = el('button', { class: 'btn small ghost', type: 'button' });
+    const isPinned = () => { const t = homeTarget(); return !!t && t.v === 'call' && t.code === code; };
+    const updPin = () => {
+      const on = isPinned();
+      pinBtn.textContent = on ? '📌 مثبّت على هذا الجهاز' : '📌 ثبّت هذا المبنى';
+      pinBtn.classList.toggle('on', on);
+      pinBtn.title = on
+        ? 'الرابط الرئيسي يفتح نداء هذا المبنى على هذا الجهاز — اضغط للإلغاء'
+        : 'خلّي الرابط الرئيسي يفتح نداء هذا المبنى مباشرة على هذا الجهاز';
+    };
+    pinBtn.addEventListener('click', () => {
+      if (isPinned()) { setHomeTarget(null); toast('تم إلغاء التثبيت', 'ok'); }
+      else {
+        const sc = resolveScope(code);
+        setHomeTarget({ v: 'call', code, label: arNum(`نداء ${(sc && sc.title) || code}`) });
+        toast('تم — الرابط الرئيسي يفتح هذا النداء على هذا الجهاز', 'ok');
+      }
+      updPin();
+    });
+    updPin();
+    subs.add(updPin);
+    const undoRow = el('div', { class: 'undo-row' }, undoButton('btn undo-btn'), pinBtn,
       el('a', { class: 'btn small ghost', href: link('call') }, 'تغيير المبنى'));
     const pad = scrollPad();
     app.append(
@@ -1248,7 +1270,7 @@
       // كل الطلبة مجمّعين حسب الصف
       const groups = new Map();
       for (const s of list) {
-        const g = multiB && scope.b == null ? `${s.c}` : s.c;
+        const g = s.c || '—';
         if (!groups.has(g)) groups.set(g, []);
         groups.get(g).push(s);
       }
@@ -1257,15 +1279,17 @@
       for (const g of keys) groups.get(g).sort((a, b) => rank[a.st] - rank[b.st] || cmpText(a.n, b.n));
       // القائمة تُبنى كل ١٥ ثانية طول اليوم. بناء مئات العناصر بلا داعٍ يرهق
       // التلفزيون ويقطع التدوير السلس، فلا نبنيها إلا إذا تغيّر محتواها فعلًا.
-      const sig = keys.map((g) => g + ':' + groups.get(g).map((s) => s.id + s.st + s.n).join(',')).join('|');
+      const sig = keys.map((g) => g + ':' + groups.get(g).map((s) => s.id + s.st + s.b + s.n).join(',')).join('|');
       if (sig !== rosterSig) {
         rosterSig = sig;
         const rosterTop = roster.scrollTop;
         roster.replaceChildren(...keys.map((g) => {
           const items = groups.get(g);
           const outN = items.filter((s) => s.st === 'out').length;
+          // في عرض «كل المباني» نذكر المبنى في العنوان، وإلا تشابهت الصفوف
+          const bset = multiB ? [...new Set(items.map((s) => bldName(s.b)))].join(' + ') : '';
           return el('div', { class: 'rgroup' },
-            el('h3', null, g, el('small', null, `${outN}/${items.length} خرج`)),
+            el('h3', null, g, el('small', null, `${outN}/${items.length} خرج${bset ? ' · ' + bset : ''}`)),
             // المنتظر زر حقيقي لا span: يصله ريموت التلفزيون ولوحة المفاتيح وقارئ الشاشة
             el('div', { class: 'pills' }, items.map((s) => el(s.st === 'called' ? 'button' : 'span', {
               class: 'pill ' + s.st,

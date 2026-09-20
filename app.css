@@ -154,8 +154,9 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .toast-btn { background: #fff; color: var(--navy); border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 800; cursor: pointer; }
 
 /* ---------- التراجع وأزرار التمرير ---------- */
-.undo-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.undo-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .undo-row:empty { display: none; }
+.undo-row .btn.on { background: var(--navy); border-color: var(--navy); color: #fff; }
 .undo-btn { background: var(--wait-bg); border-color: var(--wait-line); color: #8a4b00; font-weight: 800; flex: 1; }
 .undo-btn[hidden] { display: none; }
 
