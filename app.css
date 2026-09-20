@@ -378,8 +378,13 @@ body.page-screen {
 .grid {
   --cols: 2;
   display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: 1vw;
-  align-content: start; overflow: hidden; flex: 1;
+  align-content: start; flex: 1;
+  /* overflow: auto لا hidden: لا نخفي منتظرًا أبدًا، والتدوير في app.js يعرض البقية */
+  overflow: auto; scrollbar-width: none; position: relative;
 }
+.grid::-webkit-scrollbar { display: none; }
+/* تدرّج أسفل الشبكة يدلّ أن تحتها مزيد من المنتظرين */
+.grid.more { -webkit-mask-image: linear-gradient(to bottom, #000 88%, transparent); mask-image: linear-gradient(to bottom, #000 88%, transparent); }
 .page-screen .card {
   background: #fff; color: var(--navy-3); border: 0; border-radius: 1vw; cursor: pointer; text-align: start;
   padding: 1.1vw 1.4vw; display: flex; flex-direction: column; justify-content: center; gap: .5vw;
@@ -388,8 +393,10 @@ body.page-screen {
   min-width: 0; font-family: inherit;
 }
 .card-name {
-  font-weight: 800; line-height: 1.2; overflow-wrap: anywhere;
-  font-size: calc(6.4vw / var(--cols));
+  font-weight: 800; line-height: 1.25;
+  /* الكسر عند المسافات فقط: «عبدالله» تُقرأ اسمًا، أما «عبدال/له» فلا */
+  overflow-wrap: break-word; word-break: normal; hyphens: none;
+  font-size: calc(5.9vw / var(--cols));
 }
 .card-meta { display: flex; align-items: center; justify-content: space-between; gap: 1vw; }
 .badge {

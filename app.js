@@ -171,18 +171,47 @@
     else setAt(path, data);
   }
 
+  function getAt(path) {
+    let o = root;
+    for (const p of String(path || '').split('/').filter(Boolean)) {
+      if (!o || typeof o !== 'object') return undefined;
+      o = o[p];
+    }
+    return o;
+  }
+  const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+
+  // المسارات التي ستتغيّر فعلًا، حتى نعرف ما الذي نرجعه لو فشل الحفظ
+  function touched(method, path, data) {
+    if (method === 'PATCH') return Object.keys(data || {}).map((k) => (path ? path + '/' : '') + k);
+    return [path];
+  }
+
   async function write(method, path, data) {
+    // نلتقط الحالة قبل التعديل: لو فشل الحفظ نرجعها، وإلا بقيت الواجهة تكذب —
+    // الجوال يقول «تم النداء» وما وصل الخادم شيء ولا تعرف الشاشة به.
+    const before = touched(method, path, data).map((p) => [p, clone(getAt(p))]);
     applyLocal(method, path, localize(data));
     emit();
     if (!REMOTE) { saveLocal(); return true; }
+    // بلا مهلة قد يبقى الطلب معلّقًا إلى الأبد فيُبتلع النداء بصمت
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
     try {
       const url = `${DB}/schools/${encodeURIComponent(KEY)}${path ? '/' + path : ''}.json`;
-      const r = await fetch(url, { method, body: method === 'DELETE' ? undefined : JSON.stringify(data) });
+      const r = await fetch(url, {
+        method, signal: ctrl.signal,
+        body: method === 'DELETE' ? undefined : JSON.stringify(data),
+      });
       if (!r.ok) throw new Error(String(r.status));
       return true;
     } catch (err) {
-      toast('تعذّر الحفظ — تأكد من الإنترنت وحاول مرة ثانية', 'err');
+      for (const [p, v] of before) setAt(p, v);
+      emit();
+      toast('ما انحفظ — تأكد من الإنترنت', 'err', { label: 'أعد المحاولة', fn: () => write(method, path, data) });
       return false;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -360,7 +389,8 @@
     }
     t.className = 'show ' + (kind || '');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.className = ''; }, action ? 6000 : 2800);
+    // رسالة الفشل تبقى أطول: المسؤول في الموقف مشغول ولا يلاحق تنبيهًا يمرّ بثانيتين
+    toastTimer = setTimeout(() => { t.className = ''; }, kind === 'err' ? 12000 : action ? 6000 : 2800);
   }
 
   async function copy(text, label) {
@@ -940,6 +970,8 @@
       });
       for (const [id, card] of cards) if (!seen.has(id)) { card.remove(); cards.delete(id); }
       const n = called.length;
+      // نتوقف عند 4 أعمدة: الأسماء الثلاثية والرباعية لا تُقرأ في عمود أضيق،
+      // والبقية يعرضها التدوير بدل أن نضغطها حتى تصير غير مقروءة
       cardsWrap.style.setProperty('--cols', n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4);
       cardsWrap.hidden = n === 0;
       calledEmpty.hidden = n > 0;
@@ -966,6 +998,7 @@
 
       if (fresh) chime();
       first = false;
+      setTimeout(markMore, 0); // بعد ما يستقر التخطيط
     }
 
     const onVis = async () => {
@@ -975,14 +1008,32 @@
     };
     document.addEventListener('visibilitychange', onVis);
 
+    // لو ضاقت الشاشة عن كل المنتظرين، ندوّر العرض ببطء بدل إخفاء الأقدم إلى الأبد.
+    // التلفزيون ما عنده من يمرّر، فالتدوير هو الطريقة الوحيدة ليظهر الجميع.
+    function markMore() {
+      cardsWrap.classList.toggle('more', cardsWrap.scrollHeight - cardsWrap.clientHeight > 4);
+    }
+    function cycleCards() {
+      const over = cardsWrap.scrollHeight - cardsWrap.clientHeight;
+      markMore();
+      if (over <= 4) { cardsWrap.scrollTop = 0; return; }
+      // نصعد للبداية فقط إذا وصلنا الطرف، وإلا نتقدّم ونقف عند الطرف تمامًا —
+      // وإلا قفزت الشبكة راجعة كلما كان الفائض أقل من صفحة واحدة
+      const atEnd = cardsWrap.scrollTop >= over - 4;
+      const next = atEnd ? 0 : Math.min(cardsWrap.scrollTop + cardsWrap.clientHeight * 0.85, over);
+      cardsWrap.scrollTo({ top: next, behavior: 'smooth' });
+    }
+
     tick();
     subs.add(render);
     render();
     const t1 = setInterval(tick, 1000);
     const t2 = setInterval(render, 15000);
+    const t4 = setInterval(cycleCards, 5000);
     cleanup = () => {
       clearInterval(t1);
       clearInterval(t2);
+      clearInterval(t4);
       document.removeEventListener('visibilitychange', onVis);
       document.removeEventListener('keydown', onKey);
       pad.dispose();
