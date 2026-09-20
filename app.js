@@ -98,12 +98,12 @@
 
   // عدّاد الانتظار بالدقائق والثواني — يبيّن للمسؤول كم صار للطالب واقفًا
   function waited(t) {
-    const e = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    const e = Math.max(0, Math.floor((now() - t) / 1000));
     return arNum(`${Math.floor(e / 60)}:${String(e % 60).padStart(2, '0')}`);
   }
 
   function ago(t) {
-    const m = Math.floor((Date.now() - t) / 60000);
+    const m = Math.floor((now() - t) / 60000);
     if (m < 1) return 'الآن';
     if (m === 1) return 'قبل دقيقة';
     if (m === 2) return 'قبل دقيقتين';
@@ -178,10 +178,22 @@
     if (val == null) delete o[last]; else o[last] = val;
   }
 
+  // ساعة الخادم. جهاز بساعة غلط كان يفرّغ الشاشة (كل النداءات «ليست اليوم»)
+  // أو يُخرج الجميع فورًا، والمؤشر يقول «متصل» طوال الوقت.
+  let skew = 0;
+  const now = () => Date.now() + skew;
+  function syncClock(r) {
+    const h = r && r.headers && r.headers.get('Date');
+    if (!h) return;
+    const t = Date.parse(h);
+    if (Number.isFinite(t)) skew = t - Date.now();
+  }
+  const clockOff = () => Math.abs(skew) > 120000;
+
   const SV = { '.sv': 'timestamp' };
   function localize(d) {
     if (d && typeof d === 'object') {
-      if (d['.sv']) return Date.now();
+      if (d['.sv']) return now();
       const o = {};
       for (const k in d) o[k] = localize(d[k]);
       return o;
@@ -227,6 +239,7 @@
         method, signal: ctrl.signal,
         body: method === 'DELETE' ? undefined : JSON.stringify(data),
       });
+      syncClock(r);
       if (!r.ok) throw new Error(String(r.status));
       return true;
     } catch (err) {
@@ -294,12 +307,23 @@
   }
 
   if (REMOTE) {
+    // شاشة التلفزيون لا تكتب شيئًا أبدًا، فلولا هذا النداء ما عرفت وقت الخادم.
+    // نكتب `.sv: timestamp` في مسار واحد تافه لأن Firebase يعيد القيمة محلولة في الرد،
+    // وترويسة Date وحدها لا تُقرأ عبر النطاقات ما لم يسمح الخادم بكشفها.
+    const resync = () => fetch(`${DB}/schools/${encodeURIComponent(KEY)}/clock.json`, {
+      method: 'PUT', body: JSON.stringify(SV),
+    }).then(async (r) => {
+      syncClock(r);
+      const t = Number(await r.text());
+      if (Number.isFinite(t) && t > 1e12) skew = t - Date.now();
+    }).catch(() => { /* نعتمد ساعة الجهاز */ });
+    resync();
     connect();
     // إذا انقطع البث بصمت (مهم للتلفزيونات) نعيد الاتصال
     setInterval(() => { if (Date.now() - lastBeat > 75000) { setStatus('off'); lastBeat = Date.now(); connect(); } }, 20000);
     // المؤقّت وحده قد يتأخر 95 ثانية — وأكثر على جوال مقفل يخنق المؤقتات.
     // رجوع الشبكة أو عودة الصفحة للواجهة إشارة مباشرة نعيد عندها الاتصال فورًا.
-    const wake = () => { if (Date.now() - lastBeat > 20000) { setStatus('off'); connect(); } };
+    const wake = () => { if (Date.now() - lastBeat > 20000) { setStatus('off'); resync(); connect(); } };
     window.addEventListener('online', wake);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
   } else {
@@ -388,7 +412,7 @@
     const m = Number((root.settings || {}).minutes);
     return Number.isFinite(m) && m >= 0 ? m : 20;
   };
-  const isToday = (t) => new Date(t).toDateString() === new Date().toDateString();
+  const isToday = (t) => new Date(t).toDateString() === new Date(now()).toDateString();
 
   // حالة الطالب اليوم: none (لم يُنادَ) | called (وصل ولي الأمر) | out (خرج)
   // الطالب الذي طالت مدة انتظاره يبقى `called` مع علم `late`. لا نختلق له وقت
@@ -398,7 +422,7 @@
     if (!c || typeof c.t !== 'number' || !isToday(c.t)) return { st: 'none' };
     if (typeof c.o === 'number') return { st: 'out', t: c.t, o: c.o };
     const m = minutes();
-    if (m > 0 && Date.now() - c.t > m * 60000) return { st: 'called', t: c.t, late: true };
+    if (m > 0 && now() - c.t > m * 60000) return { st: 'called', t: c.t, late: true };
     return { st: 'called', t: c.t };
   }
 
@@ -1110,9 +1134,9 @@
     let first = true;
 
     function tick() {
-      const now = new Date();
-      clock.textContent = timeFmt.format(now);
-      dateEl.textContent = dateFmt.format(now);
+      const t = new Date(now());
+      clock.textContent = timeFmt.format(t);
+      dateEl.textContent = dateFmt.format(t);
 
       // العدّاد يمشي كل ثانية، لا كل إعادة رسم (كل 15 ثانية)
       for (const card of cards.values()) {
@@ -1124,11 +1148,14 @@
       if (status === 'ok') { lastOk = Date.now(); badSince = 0; }
       else if (!badSince) badSince = Date.now();
       const stale = badSince && Date.now() - badSince > 90000;
-      alert.hidden = !stale;
+      alert.hidden = !stale && !clockOff();
       if (stale) {
         alert.textContent = status === 'denied'
           ? '⚠️ رمز المدرسة غير صالح — هذه الشاشة لا تتحدّث'
           : `⚠️ انقطع الاتصال — المعروض قديم، آخر تحديث ${timeFmt.format(lastOk)}`;
+      } else if (clockOff()) {
+        // العرض صحيح لأننا نصحّح الفارق، لكن ساعة التلفزيون نفسها تحتاج ضبطًا
+        alert.textContent = '⚠️ ساعة هذا الجهاز غير مضبوطة — الأوقات معروضة بوقت الخادم';
       }
     }
 
@@ -1175,7 +1202,7 @@
           cardsWrap.append(card);
           // الجرس للنداءات الحقيقية فقط. البطاقة قد يُعاد بناؤها لأسباب أخرى
           // (تغيير إعداد، عودة اتصال) فلا يصح أن تُطلق الجرس على كل التلفزيونات.
-          if (!first && Date.now() - s.t < 90000) fresh = true;
+          if (!first && now() - s.t < 90000) fresh = true;
         }
         card.querySelector('.card-name').textContent = arNum(s.n);
         // نصغّر الخط للأسماء ذات الكلمات الطويلة بدل كسرها بنص الكلمة
@@ -1183,7 +1210,7 @@
         card.querySelector('.badge').textContent = arNum(multiB ? `${s.c} · ${bldName(s.b)}` : s.c);
         card.querySelector('.ago').textContent = waited(s.t);
         card.style.order = String(i);
-        card.classList.toggle('latest', i === 0 && Date.now() - s.t < 90000);
+        card.classList.toggle('latest', i === 0 && now() - s.t < 90000);
         card.classList.toggle('late', !!s.late);
       });
       for (const [id, card] of cards) if (!seen.has(id)) { card.remove(); cards.delete(id); }
