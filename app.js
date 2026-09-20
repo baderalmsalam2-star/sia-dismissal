@@ -482,11 +482,14 @@
   }
 
   // زر التراجع الظاهر — يختفي إذا ما فيه إجراء
-  function undoButton(cls) {
+  // short: نص مختصر للترويسات الضيقة، والاسم الكامل في التلميح
+  function undoButton(cls, short) {
     const b = el('button', { class: cls, type: 'button', hidden: true, onclick: undoLast });
     const upd = () => {
       b.hidden = !lastAct;
-      if (lastAct) b.textContent = arNum(`↶ تراجع عن ${lastAct.label}`);
+      if (!lastAct) return;
+      b.textContent = short ? '↶ تراجع' : arNum(`↶ تراجع عن ${lastAct.label}`);
+      b.title = arNum(`تراجع عن ${lastAct.label}`);
     };
     upd();
     subs.add(upd);
@@ -949,24 +952,21 @@
     };
     document.addEventListener('keydown', onKey);
 
-    const undoBtn = undoButton('scr-undo');
+    const undoBtn = undoButton('scr-undo', true);
     const pad = scrollPad();
     // شريط إنذار: بدونه يبدو التلفزيون المنقطع مطابقًا للحي — الساعة تمشي والقائمة ثابتة
     const alert = el('div', { class: 'scr-alert', hidden: true });
     let lastOk = Date.now();
     let badSince = 0;
 
+    // ثلاثة أقسام لا صفٌّ واحد: الشعار في العمود الأوسط فلا يزاحمه زر التراجع
     app.append(
       el('header', { class: 'scr-head' },
+        el('div', { class: 'scr-side' }, backBtn, pinBtn, el('div', { class: 'scr-title' }, title, sub)),
         el('a', { class: 'scr-home', href: link('home'), title: 'تغيير الرمز' },
           el('img', { class: 'scr-logo', src: 'assets/icon-192.png', alt: 'الرئيسية' })),
-        backBtn,
-        pinBtn,
-        el('div', { class: 'scr-title' }, title, sub),
-        undoBtn,
-        stats,
-        el('div', { class: 'scr-time' }, clock, dateEl),
-        statusPill()),
+        el('div', { class: 'scr-side end' },
+          undoBtn, stats, el('div', { class: 'scr-time' }, clock, dateEl), statusPill())),
       alert, body, notFound, startBtn, pad);
 
     const cards = new Map();
