@@ -510,13 +510,41 @@
       if (document.activeElement && form.contains(document.activeElement)) return;
       body.replaceChildren();
       if (DB && !KEY) {
-        body.append(el('section', { class: 'card setup' },
-          el('h2', null, 'أول مرة؟'),
-          el('p', null, 'أنشئ رمزًا خاصًا للمدرسة. بعدها كل رابط تنسخه من صفحة التوزيع يحمل هذا الرمز.'),
-          el('button', {
-            class: 'btn primary big', type: 'button',
-            onclick: () => { const k = newKey(); lsSet('km-key', k); location.hash = '#k=' + k + '&v=manage'; location.reload(); },
-          }, 'إنشاء رمز المدرسة')));
+        // الحالة الشائعة هنا ليست مدرسة جديدة، بل رابط فُتح بلا رمز (مثلًا أيقونة
+        // على الشاشة الرئيسية فقدت الـ hash). لذلك "الصق الرابط" هو الخيار الأول،
+        // وإنشاء مدرسة جديدة مخفي خلف تحذير — لأنه يبدأ بقائمة فاضية.
+        const paste = el('input', {
+          class: 'code-input', dir: 'ltr', placeholder: 'الصق رابط المدرسة هنا',
+          'aria-label': 'رابط المدرسة', autocomplete: 'off',
+        });
+        const perr = el('p', { class: 'code-err', role: 'alert' });
+        const useKey = (e) => {
+          if (e) e.preventDefault();
+          const raw = paste.value.trim();
+          const m = raw.match(/[?#&]k=([^&\s]+)/) || raw.match(/^([a-z0-9]{20,})$/i);
+          if (!m) { perr.textContent = 'ما لقينا رمز المدرسة في هذا النص — الصق الرابط كامل.'; paste.select(); return; }
+          lsSet('km-key', m[1]);
+          location.hash = '#k=' + m[1];
+          location.reload();
+        };
+        body.append(el('form', { class: 'card setup', onsubmit: useKey },
+          el('h2', null, 'وين رمز المدرسة؟'),
+          el('p', null, 'هذي الصفحة فتحت بدون رمز المدرسة، فما نقدر نعرض الأسماء. الصق رابط المدرسة الكامل (اللي فيه ‎#k=‎) وبيرجع كل شي.'),
+          el('div', { class: 'code-row' }, paste, el('button', { class: 'btn primary', type: 'submit' }, 'دخول')),
+          perr,
+          el('details', { class: 'danger-zone' },
+            el('summary', null, 'أنا مدرسة جديدة وما عندي رمز'),
+            el('p', { class: 'hint' }, '⚠️ هذا ينشئ مدرسة فاضية برمز جديد. إذا مدرستك مسجّلة أصلًا فلا تضغط — استخدم رابطك القديم، وإلا بتشوف قائمة فاضية وتظن إن البيانات ضاعت.'),
+            el('button', {
+              class: 'btn ghost danger', type: 'button',
+              onclick: () => {
+                if (!confirm('إنشاء مدرسة جديدة فاضية؟ إذا عندك رابط مدرسة قديم استخدمه بدل هذا.')) return;
+                const k = newKey();
+                lsSet('km-key', k);
+                location.hash = '#k=' + k + '&v=manage';
+                location.reload();
+              },
+            }, 'إنشاء مدرسة جديدة'))));
         return;
       }
       if (REMOTE && ready && !Object.keys(root.students || {}).length) {

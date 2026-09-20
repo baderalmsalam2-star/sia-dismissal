@@ -162,6 +162,11 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .b-actions .btn { flex: 1; }
 .map-link { font-size: .75rem; color: var(--muted); padding: 6px 14px 10px; text-decoration: none; border-top: 1px dashed var(--line); }
 .setup { text-align: center; }
+.setup .code-row { margin-top: 12px; }
+.setup .code-input { font-size: 1rem; text-align: start; font-weight: 500; }
+.danger-zone { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); text-align: start; }
+.danger-zone summary { cursor: pointer; color: var(--muted); font-size: .88rem; }
+.danger-zone[open] summary { margin-bottom: 8px; }
 
 /* ---------- النداء ---------- */
 .controls {
