@@ -441,7 +441,7 @@
     return el('header', { class: 'topbar' },
       withBack ? el('a', { class: 'back', href: link('home'), 'aria-label': 'رجوع للرئيسية' },
         el('span', { class: 'back-i' }, '›'), el('span', { class: 'back-t' }, 'رجوع')) : null,
-      el('img', { class: 'topbar-logo', src: 'assets/logo.png', alt: '' }),
+      el('img', { class: 'topbar-logo', src: 'assets/icon-192.png', alt: '' }),
       el('div', { class: 'topbar-title' }, el('strong', null, title), el('small', null, CFG.schoolName || '')),
       statusPill());
   }
@@ -749,7 +749,7 @@
             el('span', null, el('span', { class: 'dot out' }), 'خرج'))),
         roster));
     const notFound = el('div', { class: 'scr-msg', hidden: true },
-      el('img', { src: 'assets/logo.png', alt: '' }),
+      el('img', { src: 'assets/icon-192.png', alt: '' }),
       el('p', null, 'ما لقينا مبنى أو صف بالرمز: ', el('b', null, code)),
       el('a', { class: 'btn primary big', href: link('home') }, 'رجوع وإدخال رمز ثاني'));
 
@@ -804,7 +804,7 @@
     app.append(
       el('header', { class: 'scr-head' },
         el('a', { class: 'scr-home', href: link('home'), title: 'تغيير الرمز' },
-          el('img', { class: 'scr-logo', src: 'assets/logo.png', alt: 'الرئيسية' })),
+          el('img', { class: 'scr-logo', src: 'assets/icon-192.png', alt: 'الرئيسية' })),
         backBtn,
         pinBtn,
         el('div', { class: 'scr-title' }, title, sub),
