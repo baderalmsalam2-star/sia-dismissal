@@ -68,7 +68,10 @@
   // وجهة ثابتة لهذا الجهاز (للتلفزيونات): الرابط الواحد يفتحها مباشرة عند التشغيل
   const homeTarget = () => { try { return JSON.parse(lsGet('km-home-target') || 'null'); } catch { return null; } };
   const setHomeTarget = (t) => lsSet('km-home-target', t ? JSON.stringify(t) : null);
-  let autoOpened = false; // يفتح تلقائيًا مرة واحدة لكل تشغيل، حتى لا يحبس المستخدم
+  // موعد الفتح التلقائي. 0 = لم يبدأ، -1 = أُلغي أو نُفّذ لهذا التشغيل.
+  // يُحفظ كوقت لا كعنصر في الصفحة: إعادة رسم الرئيسية (تحدث عند أول وصول
+  // للبيانات من Firebase) كانت تمسح البطاقة فيموت العدّاد قبل أن يفتح الشاشة.
+  let autoAt = 0;
 
   const timeFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { hour: 'numeric', minute: '2-digit' });
   const dateFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -565,35 +568,25 @@
           el('p', null, 'قائمة الطلبة فاضية.'),
           el('a', { class: 'btn primary', href: link('manage') }, 'افتح التوزيع وعبّئ القائمة')));
       }
-      // هذا الجهاز مثبّت على شاشة معيّنة؟ نفتحها مع مهلة قصيرة للإلغاء
+      // هذا الجهاز مثبّت على شاشة معيّنة؟ نفتحها مع مهلة قصيرة للإلغاء.
+      // البطاقة تُعاد بناؤها مع كل رسم، والعدّ يعيش في autoAt لا في الصفحة.
       const t = homeTarget();
-      if (t) {
-        if (!autoOpened) {
-          autoOpened = true;
-          let n = 3;
-          const num = el('b', null, String(n));
-          const card = el('section', { class: 'card warn autogo' },
-            el('p', null, `جاري فتح ${t.label} خلال `, num, ' ثوانٍ…'),
-            el('button', {
-              class: 'btn', type: 'button',
-              onclick: () => { clearInterval(iv); card.remove(); render(); },
-            }, 'إلغاء — أبي أختار غيرها'));
-          const iv = setInterval(() => {
-            if (!document.body.contains(card)) { clearInterval(iv); return; }
-            n--;
-            num.textContent = String(n);
-            if (n <= 0) { clearInterval(iv); location.hash = link(t.v, { code: t.code }); }
-          }, 1000);
-          body.append(card);
-        } else {
-          body.append(el('section', { class: 'card' },
-            el('p', { class: 'hint' }, 'هذا الجهاز مثبّت على:'),
-            el('a', { class: 'btn primary big', href: link(t.v, { code: t.code }) }, t.label),
-            el('button', {
-              class: 'btn small ghost', type: 'button',
-              onclick: () => { setHomeTarget(null); toast('تم إلغاء التثبيت', 'ok'); render(); },
-            }, 'إلغاء التثبيت')));
-        }
+      if (t && autoAt > 0) {
+        body.append(el('section', { class: 'card warn autogo' },
+          el('p', null, `جاري فتح ${t.label} خلال `,
+            el('b', { class: 'autogo-n' }, String(secsLeft())), ' ثوانٍ…'),
+          el('button', {
+            class: 'btn', type: 'button',
+            onclick: () => { autoAt = -1; render(); },
+          }, 'إلغاء — أبي أختار غيرها')));
+      } else if (t) {
+        body.append(el('section', { class: 'card' },
+          el('p', { class: 'hint' }, 'هذا الجهاز مثبّت على:'),
+          el('a', { class: 'btn primary big', href: link(t.v, { code: t.code }) }, t.label),
+          el('button', {
+            class: 'btn small ghost', type: 'button',
+            onclick: () => { setHomeTarget(null); toast('تم إلغاء التثبيت', 'ok'); render(); },
+          }, 'إلغاء التثبيت')));
       }
       body.append(
         form,
@@ -616,9 +609,22 @@
           el('span', null, el('strong', null, 'التوزيع والإعدادات'), el('small', null, 'نقل الطلبة بين المباني، الإضافة والحذف، الروابط'))) : '',
       );
     }
+    const target = homeTarget();
+    if (target && autoAt === 0) autoAt = Date.now() + 3000;
+    // العدّاد يعمل بمعزل عن إعادة الرسم، فلا يهم كم مرة تُعاد بناء البطاقة
+    const autoTick = () => {
+      if (!target || autoAt <= 0) return;
+      const n = body.querySelector('.autogo-n');
+      if (n) n.textContent = String(secsLeft());
+      if (Date.now() >= autoAt) { autoAt = -1; location.hash = link(target.v, { code: target.code }); }
+    };
+    const ivAuto = setInterval(autoTick, 250);
+    cleanup = () => clearInterval(ivAuto);
+
     subs.add(render);
     render();
   }
+  const secsLeft = () => Math.max(0, Math.ceil((autoAt - Date.now()) / 1000));
 
   // ---------- النداء (المواقف) — لكل مبنى نداؤه الخاص ----------
   function viewCall() {
@@ -841,6 +847,10 @@
 
     const undoBtn = undoButton('scr-undo');
     const pad = scrollPad();
+    // شريط إنذار: بدونه يبدو التلفزيون المنقطع مطابقًا للحي — الساعة تمشي والقائمة ثابتة
+    const alert = el('div', { class: 'scr-alert', hidden: true });
+    let lastOk = Date.now();
+    let badSince = 0;
 
     app.append(
       el('header', { class: 'scr-head' },
@@ -851,8 +861,9 @@
         el('div', { class: 'scr-title' }, title, sub),
         undoBtn,
         stats,
-        el('div', { class: 'scr-time' }, clock, dateEl)),
-      body, notFound, startBtn, pad);
+        el('div', { class: 'scr-time' }, clock, dateEl),
+        statusPill()),
+      alert, body, notFound, startBtn, pad);
 
     const cards = new Map();
     let first = true;
@@ -861,6 +872,17 @@
       const now = new Date();
       clock.textContent = timeFmt.format(now);
       dateEl.textContent = dateFmt.format(now);
+
+      // بعد 90 ثانية انقطاع نصرّح بذلك بخط كبير بدل ترك شاشة متجمّدة تبدو سليمة
+      if (status === 'ok') { lastOk = Date.now(); badSince = 0; }
+      else if (!badSince) badSince = Date.now();
+      const stale = badSince && Date.now() - badSince > 90000;
+      alert.hidden = !stale;
+      if (stale) {
+        alert.textContent = status === 'denied'
+          ? '⚠️ رمز المدرسة غير صالح — هذه الشاشة لا تتحدّث'
+          : `⚠️ انقطع الاتصال — المعروض قديم، آخر تحديث ${timeFmt.format(lastOk)}`;
+      }
     }
 
     function render() {
