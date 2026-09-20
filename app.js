@@ -466,6 +466,14 @@
     remember(`نداء ${s.n}`, fn);
     toast(`تم نداء ${s.n}`, 'ok', { label: 'تراجع', fn: undoLast });
   }
+  // نداء بالغلط: يُشال الطالب من المنتظرين ويرجع كأن شيئًا لم يكن
+  function cancelCall(s) {
+    const fn = undoTo(s.id);
+    write('DELETE', `calls/${s.id}`);
+    remember(`إلغاء نداء ${s.n}`, fn);
+    toast(`أُلغي نداء ${s.n}`, 'ok', { label: 'تراجع', fn: undoLast });
+  }
+
   function markOut(s) {
     const fn = undoTo(s.id);
     write('PATCH', `calls/${s.id}`, { o: SV });
@@ -798,16 +806,34 @@
         return;
       }
 
-      const tile = (s) => el('div', { class: 'nt ' + s.st },
-        el('button', { class: 'nt-main', type: 'button', onclick: () => callStudent(s) },
-          el('span', { class: 'nt-name' }, s.n),
-          el('span', { class: 'nt-meta' },
-            s.st === 'called' ? `⏳ ينتظر · ${ago(s.t)}`
-              : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
-              : (onlyCalled || nq ? s.c : ''))),
-        s.st === 'called'
-          ? el('button', { class: 'nt-out', type: 'button', 'aria-label': `${s.n} خرج`, onclick: () => markOut(s) }, 'خرج ✓')
-          : null);
+      const tile = (s) => {
+        const meta = s.st === 'called' ? `⏳ ينتظر · ${ago(s.t)}`
+          : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
+          : (onlyCalled || nq ? s.c : '');
+        // الطالب المنادى لا يُعاد نداؤه بلمسة على اسمه — الإجراءان صريحان تحته
+        const head = s.st === 'called'
+          ? el('div', { class: 'nt-main is-called' },
+              el('span', { class: 'nt-name' }, s.n), el('span', { class: 'nt-meta' }, meta))
+          : el('button', {
+              class: 'nt-main', type: 'button',
+              onclick: () => {
+                if (s.st === 'out' && !confirm(`${s.n} سبق أن خرج. تنادونه مرة ثانية؟`)) return;
+                callStudent(s);
+              },
+            }, el('span', { class: 'nt-name' }, s.n), el('span', { class: 'nt-meta' }, meta));
+        return el('div', { class: 'nt ' + s.st }, head,
+          s.st === 'called'
+            ? el('div', { class: 'nt-acts' },
+                el('button', {
+                  class: 'nt-cancel', type: 'button', 'aria-label': `إلغاء نداء ${s.n}`,
+                  onclick: () => cancelCall(s),
+                }, '✕ غلط'),
+                el('button', {
+                  class: 'nt-out', type: 'button', 'aria-label': `${s.n} خرج`,
+                  onclick: () => markOut(s),
+                }, 'خرج ✓'))
+            : null);
+      };
 
       if (onlyCalled) {
         list.append(el('div', { class: 'ngrid' }, rows.sort((a, b) => b.t - a.t).map(tile)));

@@ -248,7 +248,17 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, button:focus-visi
 .nt.out { background: var(--ok-bg); border-color: var(--ok-line); }
 .nt.out .nt-name { color: #0f5a35; }
 .nt.out .nt-meta { color: var(--ok); font-weight: 700; }
+.nt-main.is-called { cursor: default; }
+.nt-main.is-called:active { background: transparent; }
+/* إجراءان صريحان للمنتظر: «غلط» يلغي النداء، و«خرج» يؤكّد خروجه */
+.nt-acts { display: grid; grid-template-columns: 34% 1fr; }
 .nt-out { border: 0; background: var(--ok); color: #fff; font-weight: 800; padding: 8px; cursor: pointer; }
+.nt-cancel {
+  border: 0; border-inline-end: 1px solid rgba(255,255,255,.35);
+  background: #8a3b36; color: #fff; font-weight: 800; padding: 8px 4px; cursor: pointer;
+  font-size: .9rem; white-space: nowrap;
+}
+.nt-cancel:active { background: #a04a44; }
 .pick { display: grid; gap: 10px; }
 .pick-b {
   display: flex; flex-direction: column; text-decoration: none; background: var(--card);
