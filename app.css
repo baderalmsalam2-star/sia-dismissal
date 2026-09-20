@@ -510,8 +510,11 @@ body.page-screen {
 .pill {
   border-radius: 999px; padding: .2vw .75vw; font-size: clamp(12px, .95vw, 22px); font-weight: 700;
   background: rgba(255,255,255,.92); color: var(--navy-3);
+  font-family: inherit; border: 0; line-height: inherit; /* الحبّة قد تكون زرًا */
 }
-.pill.called { background: #ffb547; color: #3a2200; cursor: pointer; animation: blink 1.6s ease-in-out infinite; }
+/* وميض محدود بثماني نبضات: يلفت النظر عند النداء ثم يهدأ. الوميض الدائم كان
+   يعيد رسم عشرات الحبّات طوال اليوم فيُثقل التلفزيون — واللون البرتقالي كافٍ بعدها */
+.pill.called { background: #ffb547; color: #3a2200; cursor: pointer; animation: blink 1.6s ease-in-out 8; }
 .pill.out { background: rgba(87,217,143,.16); color: #9ae6bb; text-decoration: line-through; text-decoration-thickness: 1px; font-weight: 500; }
 @keyframes blink { 50% { box-shadow: 0 0 0 .3vw rgba(255,181,71,.45); } }
 

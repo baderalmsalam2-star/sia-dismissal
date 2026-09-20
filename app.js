@@ -533,16 +533,21 @@
     return () => (snap ? write('PUT', `calls/${id}`, snap) : write('DELETE', `calls/${id}`));
   }
 
-  // آخر إجراء — يبقى متاحًا للتراجع حتى بعد اختفاء التنبيه
+  // آخر إجراء — يبقى متاحًا للتراجع حتى بعد اختفاء التنبيه، لكن ثلاث دقائق فقط:
+  // زر تراجع باقٍ من الصباح يرجع نداءً قديمًا إلى قائمة الانتظار بضغطة عابرة
+  const UNDO_TTL = 180000;
   let lastAct = null;
-  function remember(label, fn) { lastAct = { label, fn }; }
+  const liveAct = () => (lastAct && now() - lastAct.at < UNDO_TTL ? lastAct : null);
+  function remember(label, fn) { lastAct = { label, fn, at: now() }; }
   function undoLast() {
-    if (!lastAct) return;
-    const a = lastAct;
+    const a = liveAct();
     lastAct = null;
+    if (!a) { emit(); return; }
     a.fn();
     toast(`تم التراجع عن ${a.label}`, 'ok');
   }
+  // مؤقّت واحد للتطبيق كله: يخفي الزر عند انتهاء المهلة بدل تركه معروضًا
+  setInterval(() => { if (lastAct && !liveAct()) { lastAct = null; emit(); } }, 10000);
 
   function callStudent(s) {
     const fn = undoTo(s.id);
@@ -560,10 +565,24 @@
   }
 
   function markOut(s) {
+    // بطاقة قديمة على شاشة ما تحدّثت: الضغط عليها كان يكتب «خرج» على نداء
+    // ملغى أو من يوم فات فيبقى سجلٌّ يتيم لا يظهر لأحد
+    const c = (root.calls || {})[s.id];
+    if (!c || !isToday(c.t)) { emit(); return; }
     const fn = undoTo(s.id);
     write('PATCH', `calls/${s.id}`, { o: SV });
     remember(`خروج ${s.n}`, fn);
     toast(`${s.n} خرج`, '', { label: 'تراجع', fn: undoLast });
+  }
+
+  // تعبئة القائمة الأولية: نستبدل المباني والطلبة فقط. الكتابة على الجذر كانت
+  // تمحو معها الإعدادات والرقم السري، فيفتح باب التوزيع للجميع بلا أن ينتبه أحد
+  function seedFill() {
+    const s = JSON.parse(JSON.stringify(window.SEED || {}));
+    const patch = { calls: null };
+    if (s.buildings) patch.buildings = s.buildings;
+    if (s.students) patch.students = s.students;
+    return write('PATCH', '', patch);
   }
 
   // زر التراجع الظاهر — يختفي إذا ما فيه إجراء
@@ -571,10 +590,11 @@
   function undoButton(cls, short) {
     const b = el('button', { class: cls, type: 'button', hidden: true, onclick: undoLast });
     const upd = () => {
-      b.hidden = !lastAct;
-      if (!lastAct) return;
-      b.textContent = short ? '↶ تراجع' : arNum(`↶ تراجع عن ${lastAct.label}`);
-      b.title = arNum(`تراجع عن ${lastAct.label}`);
+      const a = liveAct();
+      b.hidden = !a;
+      if (!a) return;
+      b.textContent = short ? '↶ تراجع' : arNum(`↶ تراجع عن ${a.label}`);
+      b.title = arNum(`تراجع عن ${a.label}`);
     };
     upd();
     subs.add(upd);
@@ -1132,6 +1152,7 @@
 
     const cards = new Map();
     let first = true;
+    let rosterSig = '';
 
     function tick() {
       const t = new Date(now());
@@ -1232,20 +1253,29 @@
         groups.get(g).push(s);
       }
       const rank = { called: 0, none: 1, out: 2 };
-      const rosterTop = roster.scrollTop;
-      roster.replaceChildren(...[...groups.keys()].sort(cmpClass).map((g) => {
-        const items = groups.get(g).sort((a, b) => rank[a.st] - rank[b.st] || cmpText(a.n, b.n));
-        const outN = items.filter((s) => s.st === 'out').length;
-        return el('div', { class: 'rgroup' },
-          el('h3', null, g, el('small', null, `${outN}/${items.length} خرج`)),
-          el('div', { class: 'pills' }, items.map((s) => el('span', {
-            class: 'pill ' + s.st,
-            title: s.st === 'out' ? `خرج ${timeFmt.format(s.o)}` : s.st === 'called' ? 'ينتظر الخروج' : '',
-            onclick: s.st === 'called' ? () => markOut({ id: s.id, ...root.students[s.id] }) : null,
-          }, s.st === 'out' ? '✓ ' : '', s.n))));
-      }));
-
-      roster.scrollTop = rosterTop;
+      const keys = [...groups.keys()].sort(cmpClass);
+      for (const g of keys) groups.get(g).sort((a, b) => rank[a.st] - rank[b.st] || cmpText(a.n, b.n));
+      // القائمة تُبنى كل ١٥ ثانية طول اليوم. بناء مئات العناصر بلا داعٍ يرهق
+      // التلفزيون ويقطع التدوير السلس، فلا نبنيها إلا إذا تغيّر محتواها فعلًا.
+      const sig = keys.map((g) => g + ':' + groups.get(g).map((s) => s.id + s.st + s.n).join(',')).join('|');
+      if (sig !== rosterSig) {
+        rosterSig = sig;
+        const rosterTop = roster.scrollTop;
+        roster.replaceChildren(...keys.map((g) => {
+          const items = groups.get(g);
+          const outN = items.filter((s) => s.st === 'out').length;
+          return el('div', { class: 'rgroup' },
+            el('h3', null, g, el('small', null, `${outN}/${items.length} خرج`)),
+            // المنتظر زر حقيقي لا span: يصله ريموت التلفزيون ولوحة المفاتيح وقارئ الشاشة
+            el('div', { class: 'pills' }, items.map((s) => el(s.st === 'called' ? 'button' : 'span', {
+              class: 'pill ' + s.st,
+              type: s.st === 'called' ? 'button' : null,
+              title: s.st === 'out' ? `خرج ${timeFmt.format(s.o)}` : s.st === 'called' ? 'ينتظر الخروج — اضغط عند خروجه' : '',
+              onclick: s.st === 'called' ? () => markOut({ id: s.id, ...root.students[s.id] }) : null,
+            }, s.st === 'out' ? '✓ ' : '', s.n))));
+        }));
+        roster.scrollTop = rosterTop;
+      }
 
       if (fresh) chime();
       first = false;
@@ -1370,6 +1400,13 @@
               onchange: (e) => {
                 const v = arDigits(e.target.value).trim();
                 if (blds.some((x) => x.id !== b.id && String(x.code) === v)) { toast('هذا الرمز مستخدم لمبنى ثاني', 'err'); e.target.value = b.code || ''; return; }
+                // التلفزيونات مثبّتة على الرابط بالرمز القديم: بعد التغيير تعرض
+                // «رمز غير معروف» إلى أن يفتح أحد الرابط الجديد عليها
+                if (b.code && v !== String(b.code)
+                  && !confirm(arNum(`الشاشات المثبّتة على الرمز ${b.code} بترجع «رمز غير معروف»، ولازم تفتح عليها الرابط الجديد. متأكد؟`))) {
+                  e.target.value = b.code || '';
+                  return;
+                }
                 write('PATCH', `buildings/${b.id}`, { code: v });
               },
             }),
@@ -1531,7 +1568,8 @@
               const c = cSel.value;
               const b = bSel.value;
               const patch = {};
-              for (const s of students()) if (s.c === c && s.b !== b) patch[`${s.id}/b`] = b;
+              // الطلبة بلا صف تظهر لهم «—» في القائمة، فنطابقها كما تُعرض
+              for (const s of students()) if ((s.c || '—') === c && s.b !== b) patch[`${s.id}/b`] = b;
               const n = Object.keys(patch).length;
               if (!n) { toast('الصف أصلًا في هذا المبنى'); return; }
               write('PATCH', 'students', patch);
@@ -1775,7 +1813,7 @@
             class: 'btn ghost danger', type: 'button',
             onclick: () => {
               if (!confirm('هذا يستبدل كل المباني والطلبة بالقائمة الأولية. متأكد؟')) return;
-              write('PUT', '', JSON.parse(JSON.stringify(window.SEED)));
+              seedFill();
               toast('تمت تعبئة القائمة الأولية', 'ok');
             },
           }, 'استرجاع القائمة الأولية') : null,
@@ -1851,7 +1889,7 @@
           el('p', null, `القائمة فاضية. عبّئها بالقائمة الأولية (${Object.keys(window.SEED.students).length} طالب وطالبة):`),
           el('button', {
             class: 'btn primary big', type: 'button',
-            onclick: () => { write('PUT', '', JSON.parse(JSON.stringify(window.SEED))); toast('تمت التعبئة', 'ok'); },
+            onclick: () => { seedFill(); toast('تمت التعبئة', 'ok'); },
           }, 'تعبئة القائمة')) : '',
         buildingsCard(),
         moveClassCard(),
