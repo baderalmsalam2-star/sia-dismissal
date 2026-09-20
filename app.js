@@ -1282,7 +1282,8 @@
         if (!c || isNew(c)) return null;
         const i = classInfo(c);
         if (i.n == null) return null; // رعاية وما شابهها: لا رقم مرحلة، تُترك كما هي
-        return classCode({ n: i.n, sec: i.sec, girls: i.girls || girlsBuilding(s.b) });
+        // الصيغة تنتهي دائمًا بحرف الشعبة، فالصف بلا حرف (G1) يصير الشعبة A
+        return classCode({ n: i.n, sec: i.sec || 'A', girls: i.girls || girlsBuilding(s.b) });
       };
 
       const all = students();
@@ -1303,7 +1304,7 @@
 
       return el('section', { class: 'card' },
         el('h2', null, 'تحويل رموز الصفوف للصيغة الجديدة'),
-        el('p', { class: 'hint' }, 'الصيغة المعتمدة BG1A: بنين/بنات، ثم G، ثم المرحلة، ثم الشعبة. الفئة تُؤخذ من الرمز القديم أو من مبنى الطالب.'),
+        el('p', { class: 'hint' }, 'الصيغة المعتمدة BG1A: بنين/بنات، ثم G، ثم المرحلة، ثم الشعبة. الفئة تُؤخذ من الرمز القديم أو من مبنى الطالب، والصف بلا حرف شعبة يصير A.'),
         !total
           ? el('p', { class: 'hint' }, done
             ? `كل الرموز محوَّلة أصلًا (${done} طالب)${kept ? ` — و${kept} بلا رقم مرحلة (رعاية وغيرها) تبقى كما هي.` : ''}`
