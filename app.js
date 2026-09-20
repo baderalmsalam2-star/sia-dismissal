@@ -244,6 +244,11 @@
     for (const s of students()) if (!bid || s.b === bid) set.add(s.c || '—');
     return [...set].sort(cmpClass);
   };
+  // الرقم السري لصفحة التوزيع — فاضي = بدون قفل
+  const adminPin = () => String((root.settings || {}).pin || '').trim();
+  // الجهاز مفتوح إذا حفظ نفس الرقم الحالي، فتغيير الرقم يقفل كل الأجهزة تلقائيًا
+  const unlocked = () => { const p = adminPin(); return !p || lsGet('km-unlock') === p; };
+
   const minutes = () => {
     const m = Number((root.settings || {}).minutes);
     return Number.isFinite(m) && m >= 0 ? m : 20;
@@ -470,6 +475,15 @@
       if (e) e.preventDefault();
       const v = input.value.trim();
       if (!v) { input.focus(); return; }
+      // الرقم السري يفتح التوزيع من نفس الخانة
+      const pin = adminPin();
+      if (pin && arDigits(v) === pin) {
+        lsSet('km-unlock', pin);
+        lsSet('km-admin', '1');
+        input.value = '';
+        location.hash = link('manage');
+        return;
+      }
       if (ready && !resolveCode(v)) { err.textContent = 'ما لقينا مبنى أو صف بهذا الرمز'; input.select(); return; }
       lsSet('km-last-code', v);
       location.hash = link('screen', { code: v });
@@ -851,7 +865,6 @@
   // ---------- التوزيع والإعدادات ----------
   function viewManage() {
     document.body.className = 'page-manage';
-    lsSet('km-admin', '1');
     const body = el('main', { class: 'manage' });
     const pad = scrollPad();
     app.append(topbar('التوزيع والإعدادات'), localBanner(), body, pad);
@@ -885,7 +898,9 @@
         el('p', { class: 'hint' }, REMOTE
           ? 'كل رابط فيه رمز المدرسة. أرسل رابط الصفحة الرئيسية للمعلمات، وكل وحدة تكتب رمز مبناها أو صفها.'
           : 'الروابط تشتغل الحين على هذا الجهاز فقط (وضع تجريبي).'),
-        el('p', { class: 'hint' }, '⚠️ رابط التوزيع خاصّ بك — لا ترسله لأحد. زرّه مخفي عن الصفحة الرئيسية ويظهر فقط على الأجهزة اللي فتحته من قبل.'),
+        el('p', { class: 'hint' }, adminPin()
+          ? '🔒 رابط التوزيع محمي بالرقم السري. وتقدر بدله تكتب الرقم في خانة الدخول بالصفحة الرئيسية.'
+          : '⚠️ رابط التوزيع خاصّ بك — لا ترسله لأحد. زرّه مخفي عن الصفحة الرئيسية، لكن بدون رقم سري أي أحد عنده الرابط يقدر يفتحه.'),
         row('🏠 الصفحة الرئيسية (للمعلمات)', absLink('home')),
         row('🗂️ التوزيع والإعدادات (خاص بك)', absLink('manage')),
         buildings().map((b) => [
@@ -968,6 +983,37 @@
           }),
           el('span', null, 'دقيقة'),
           el('span', { class: 'muted' }, '(0 = أبدًا)')));
+    }
+
+    function pinCard() {
+      const cur = adminPin();
+      const inp = el('input', {
+        value: cur, inputmode: 'numeric', dir: 'ltr', class: 'num', 'aria-label': 'الرقم السري',
+        placeholder: 'بدون رقم', autocomplete: 'off',
+      });
+      const save = () => {
+        const v = arDigits(inp.value).replace(/\s/g, '');
+        if (v && !/^\d{4,8}$/.test(v)) { toast('الرقم لازم يكون من 4 إلى 8 أرقام', 'err'); inp.select(); return; }
+        if (v === cur) { toast('ما فيه تغيير'); return; }
+        if (!v && !confirm('إلغاء الرقم السري؟ صفحة التوزيع تصير مفتوحة لأي أحد عنده الرابط.')) { inp.value = cur; return; }
+        write('PATCH', 'settings', { pin: v });
+        lsSet('km-unlock', v || null); // نبقي هذا الجهاز مفتوحًا
+        toast(v ? 'تم حفظ الرقم السري' : 'تم إلغاء الرقم السري', 'ok');
+      };
+      return el('section', { class: 'card' },
+        el('h2', null, '🔒 الرقم السري لصفحة التوزيع'),
+        el('p', { class: 'hint' }, cur
+          ? 'اكتبه في خانة الدخول بالصفحة الرئيسية وتنفتح لك صفحة التوزيع من أي جهاز.'
+          : 'بدون رقم سري، أي أحد عنده الرابط الرئيسي يقدر يفتح صفحة التوزيع. حط رقمًا من 4 إلى 8 أرقام.'),
+        el('div', { class: 'inline wrap' },
+          inp,
+          el('button', { class: 'btn primary', type: 'button', onclick: save }, 'حفظ'),
+          cur ? el('button', {
+            class: 'btn small ghost danger', type: 'button',
+            onclick: () => { inp.value = ''; save(); },
+          }, 'إلغاء الرقم') : null),
+        cur ? el('p', { class: 'hint' }, '⚠️ اكتبه عندك في مكان آمن — إذا نسيته ما فيه طريقة تسترجعه إلا من قاعدة البيانات مباشرة.') : null,
+        el('p', { class: 'hint' }, 'تغيير الرقم يقفل كل الأجهزة الثانية تلقائيًا.'));
     }
 
     function moveClassCard() {
@@ -1223,9 +1269,47 @@
         REMOTE ? el('p', { class: 'hint' }, 'رمز المدرسة: ', el('code', null, KEY)) : null);
     }
 
+    // شاشة القفل — تظهر إذا فيه رقم سري وهذا الجهاز ما فتحه
+    let tries = 0;
+    let lockedUntil = 0;
+    function lockCard() {
+      const inp = el('input', {
+        type: 'password', inputmode: 'numeric', autocomplete: 'off', class: 'code-input',
+        placeholder: '••••', 'aria-label': 'الرقم السري',
+      });
+      const err = el('p', { class: 'code-err', role: 'alert' });
+      const go = (e) => {
+        if (e) e.preventDefault();
+        if (Date.now() < lockedUntil) {
+          err.textContent = `محاولات كثيرة — انتظر ${Math.ceil((lockedUntil - Date.now()) / 1000)} ثانية`;
+          return;
+        }
+        if (arDigits(inp.value).trim() === adminPin()) {
+          lsSet('km-unlock', adminPin());
+          lsSet('km-admin', '1');
+          tries = 0;
+          render();
+          return;
+        }
+        tries++;
+        if (tries >= 5) { lockedUntil = Date.now() + 30000; tries = 0; err.textContent = 'محاولات كثيرة — انتظر 30 ثانية'; }
+        else err.textContent = 'الرقم غير صحيح';
+        inp.select();
+      };
+      setTimeout(() => inp.focus(), 50);
+      return el('form', { class: 'card code-form', onsubmit: go },
+        el('label', null, '🔒 صفحة التوزيع مقفلة'),
+        el('p', { class: 'hint' }, 'اكتب الرقم السري للدخول.'),
+        el('div', { class: 'code-row' }, inp, el('button', { class: 'btn primary', type: 'submit' }, 'دخول')),
+        err,
+        el('p', { class: 'hint' }, el('a', { href: link('home') }, '← رجوع للرئيسية')));
+    }
+
     function render() {
       pending = false;
       if (!ready) { body.replaceChildren(el('p', { class: 'empty-note' }, 'جاري التحميل…')); return; }
+      if (!unlocked()) { body.replaceChildren(lockCard()); return; }
+      lsSet('km-admin', '1'); // وصل هنا = مصرّح له، فنظهر زر التوزيع على هذا الجهاز
       const y = window.scrollY;
       const empty = !Object.keys(root.students || {}).length;
       body.replaceChildren(
@@ -1240,6 +1324,7 @@
         studentsCard(),
         linksCard(),
         settingsCard(),
+        pinCard(),
         renameCard(),
         bulkCard(),
         toolsCard());
