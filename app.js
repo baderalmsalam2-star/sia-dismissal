@@ -19,10 +19,16 @@
     }
     for (const k of kids.flat(Infinity)) {
       if (k == null || k === false) continue;
-      e.append(k.nodeType ? k : String(k));
+      e.append(k.nodeType ? k : arNum(String(k)));
     }
     return e;
   }
+
+  // الأرقام تُعرض عربية (٢٥)، لكن رموز الصفوف تبقى كما هي لأنها اصطلاح إنجليزي:
+  // G5A تبقى G5A لا G٥A. القاعدة: رقم ملاصق لحرف لاتيني لا يُحوَّل.
+  const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+  const arNum = (s) => String(s == null ? '' : s)
+    .replace(/[A-Za-z]*\d+[A-Za-z]*/g, (m) => (/[A-Za-z]/.test(m) ? m : m.replace(/\d/g, (d) => AR_DIGITS[+d])));
 
   const arDigits = (s) => String(s || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
   const norm = (s) => arDigits(s)
@@ -73,8 +79,8 @@
   // للبيانات من Firebase) كانت تمسح البطاقة فيموت العدّاد قبل أن يفتح الشاشة.
   let autoAt = 0;
 
-  const timeFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { hour: 'numeric', minute: '2-digit' });
-  const dateFmt = new Intl.DateTimeFormat('ar-KW-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
+  const timeFmt = new Intl.DateTimeFormat('ar-KW-u-nu-arab', { hour: 'numeric', minute: '2-digit' });
+  const dateFmt = new Intl.DateTimeFormat('ar-KW-u-nu-arab', { weekday: 'long', day: 'numeric', month: 'long' });
 
   function ago(t) {
     const m = Math.floor((Date.now() - t) / 60000);
@@ -400,7 +406,7 @@
     const b = el('button', { class: cls, type: 'button', hidden: true, onclick: undoLast });
     const upd = () => {
       b.hidden = !lastAct;
-      if (lastAct) b.textContent = `↶ تراجع عن ${lastAct.label}`;
+      if (lastAct) b.textContent = arNum(`↶ تراجع عن ${lastAct.label}`);
     };
     upd();
     subs.add(upd);
@@ -488,7 +494,7 @@
 
   function codeForm(big) {
     const input = el('input', {
-      class: 'code-input', placeholder: 'رقم المبنى أو الصف (25 / G5)', autocomplete: 'off',
+      class: 'code-input', placeholder: 'رقم المبنى أو الصف (٢٥ / G5)', autocomplete: 'off',
       enterkeyhint: 'go', 'aria-label': 'رمز الدخول', value: '',
     });
     const err = el('p', { class: 'code-err', role: 'alert' });
@@ -615,7 +621,7 @@
     const autoTick = () => {
       if (!target || autoAt <= 0) return;
       const n = body.querySelector('.autogo-n');
-      if (n) n.textContent = String(secsLeft());
+      if (n) n.textContent = arNum(String(secsLeft()));
       if (Date.now() >= autoAt) { autoAt = -1; location.hash = link(target.v, { code: target.code }); }
     };
     const ivAuto = setInterval(autoTick, 250);
@@ -685,8 +691,8 @@
         list.append(el('p', { class: 'empty-note' }, 'ما لقينا المبنى. ', el('a', { href: link('call') }, 'اختر المبنى')));
         return;
       }
-      titleEl.textContent = `النداء — ${scope.title}`;
-      document.title = `نداء ${scope.title}`;
+      titleEl.textContent = arNum(`النداء — ${scope.title}`);
+      document.title = arNum(`نداء ${scope.title}`);
 
       const all = [...scope.ids].map((id) => ({ id, ...root.students[id], ...stateOf(id) }));
       const nCalled = all.filter((s) => s.st === 'called').length;
@@ -894,10 +900,10 @@
       pinBtn.hidden = !scope;
       if (!scope) { title.textContent = 'رمز غير معروف'; sub.textContent = ''; return; }
 
-      title.textContent = scope.title;
+      title.textContent = arNum(scope.title);
       updPin();
-      sub.textContent = [scope.sub, CFG.schoolName].filter(Boolean).join(' · ');
-      document.title = `${scope.title} · نداء الانصراف`;
+      sub.textContent = arNum([scope.sub, CFG.schoolName].filter(Boolean).join(' · '));
+      document.title = arNum(`${scope.title} · نداء الانصراف`);
 
       const list = [...scope.ids].map((id) => ({ id, ...root.students[id], ...stateOf(id) }));
       const called = list.filter((s) => s.st === 'called').sort((a, b) => b.t - a.t);
@@ -926,8 +932,8 @@
           cardsWrap.append(card);
           if (!first) fresh = true;
         }
-        card.querySelector('.card-name').textContent = s.n;
-        card.querySelector('.badge').textContent = multiB ? `${s.c} · ${bldName(s.b)}` : s.c;
+        card.querySelector('.card-name').textContent = arNum(s.n);
+        card.querySelector('.badge').textContent = arNum(multiB ? `${s.c} · ${bldName(s.b)}` : s.c);
         card.querySelector('.ago').textContent = ago(s.t);
         card.style.order = String(i);
         card.classList.toggle('latest', i === 0 && Date.now() - s.t < 90000);
@@ -1412,7 +1418,7 @@
       const go = (e) => {
         if (e) e.preventDefault();
         if (Date.now() < lockedUntil) {
-          err.textContent = `محاولات كثيرة — انتظر ${Math.ceil((lockedUntil - Date.now()) / 1000)} ثانية`;
+          err.textContent = arNum(`محاولات كثيرة — انتظر ${Math.ceil((lockedUntil - Date.now()) / 1000)} ثانية`);
           return;
         }
         if (arDigits(inp.value).trim() === adminPin()) {
@@ -1423,7 +1429,7 @@
           return;
         }
         tries++;
-        if (tries >= 5) { lockedUntil = Date.now() + 30000; tries = 0; err.textContent = 'محاولات كثيرة — انتظر 30 ثانية'; }
+        if (tries >= 5) { lockedUntil = Date.now() + 30000; tries = 0; err.textContent = 'محاولات كثيرة — انتظر ٣٠ ثانية'; }
         else err.textContent = 'الرقم غير صحيح';
         inp.select();
       };
