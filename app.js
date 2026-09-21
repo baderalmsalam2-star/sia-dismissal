@@ -135,7 +135,7 @@
   // الأولاد محفوظون على جهاز ولي الأمر: يفتح رابط كل ولد مرة، فتصير صفحة واحدة.
   const LS_KIDS = 'km-kids';
   const kidsStored = () => { try { const a = JSON.parse(lsGet(LS_KIDS) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
-  const PARENT = !!DB && (!!P.get('p')
+  const PARENT = !!DB && (!!P.get('p') || !!P.get('i')
     || (!KEY && !P.get('k') && !P.get('v') && kidsStored().length > 0));
   const REMOTE = !!(DB && KEY) && !PARENT;
 
@@ -148,6 +148,16 @@
     return '#' + p.toString();
   }
   const absLink = (v, extra) => location.href.split('#')[0] + link(v, extra);
+
+  // بصمة الرقم المدني: الرقم لا يُحفظ عندنا ولا يخرج من الجهاز — نقارن البصمة وحدها،
+  // والملح (salt) خاص بالمدرسة حتى لا تصلح جداول جاهزة لكشف الأرقام من البصمات.
+  async function idHash(salt, id) {
+    const digits = arDigits(String(id || '')).replace(/\D/g, '');
+    if (digits.length < 8 || !salt) return '';
+    const buf = new TextEncoder().encode(`${salt}:${digits}`);
+    const h = await crypto.subtle.digest('SHA-256', buf);
+    return [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, '0')).join('').slice(0, 40);
+  }
 
   function newKey() {
     const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -458,8 +468,9 @@
     const m = d.getHours() * 60 + d.getMinutes();
     return m >= s.h1 && m <= s.h2;
   };
+  // الرمز إما من رابط فردي (p) أو بصمة الرقم المدني (h)
   const studentByTok = (tok) => Object.keys(root.students || {})
-    .find((id) => root.students[id] && root.students[id].p === tok);
+    .find((id) => root.students[id] && (root.students[id].p === tok || root.students[id].h === tok));
 
   let inboxEs = null;
   let inboxKey = null;
@@ -770,7 +781,7 @@
     app.replaceChildren();
     document.body.className = '';
     window.scrollTo(0, 0);
-    if (P.get('p') || (PARENT && !P.get('v'))) { viewParent(); return; }
+    if (P.get('p') || P.get('i') || (PARENT && !P.get('v'))) { viewParent(); return; }
     const views = { home: viewHome, call: viewCall, screen: viewScreen, manage: viewManage };
     (views[P.get('v') || 'home'] || viewHome)();
   }
@@ -990,9 +1001,57 @@
         el('small', null, 'طلب انصراف')));
     const note = el('p', { class: 'pr-note' });
     const list = el('div', { class: 'pr-kids' });
+
+    // إضافة ولد بالرقم المدني: الرقم يتحوّل بصمةً على هذا الجهاز، وما يُرسل ولا يُحفظ
+    const idIn = el('input', {
+      class: 'pr-id', type: 'tel', inputmode: 'numeric', maxlength: '12', dir: 'ltr',
+      placeholder: 'الرقم المدني للطالب', 'aria-label': 'الرقم المدني للطالب',
+    });
+    const idMsg = el('p', { class: 'pr-idmsg' });
+    const addBtn = el('button', { class: 'btn primary', type: 'submit' }, 'أضف');
+    const addForm = el('form', { class: 'pr-add', onsubmit: (e) => { e.preventDefault(); addKid(); } },
+      el('label', { for: 'pr-id-in' }, 'أضف ولدك برقمه المدني'), idIn, addBtn);
+    idIn.id = 'pr-id-in';
+    const addBox = el('details', { class: 'pr-addbox' },
+      el('summary', null, '＋ أضف ولدًا'), addForm, idMsg);
+
+    async function addKid() {
+      const raw = arDigits(idIn.value).replace(/\D/g, '');
+      if (raw.length < 8) { idMsg.className = 'pr-idmsg bad'; idMsg.textContent = 'اكتب الرقم المدني كاملًا.'; return; }
+      if (!pub || !pub.s) { idMsg.className = 'pr-idmsg bad'; idMsg.textContent = 'ما قدرنا نتصل بالمدرسة — جرّب بعد شوي.'; return; }
+      addBtn.disabled = true;
+      idMsg.className = 'pr-idmsg';
+      idMsg.textContent = 'نتأكد…';
+      try {
+        const h = await idHash(pub.s, raw);
+        if (kids.some((k) => k.t === h)) { idMsg.textContent = 'هذا الولد موجود في صفحتك.'; return; }
+        const r = await fetch(`${DB}/p/${encodeURIComponent(h)}.json`, { cache: 'no-store' });
+        const v = r.ok ? await r.json() : null;
+        if (!v) {
+          idMsg.className = 'pr-idmsg bad';
+          idMsg.textContent = 'ما لقينا طالبًا بهذا الرقم المدني. تأكد منه، أو كلّم المدرسة.';
+          return;
+        }
+        const n = (v && v.n) || '';
+        if (!confirm(`${n || 'هذا الطالب'} — هذا ولدك؟`)) { idMsg.textContent = ''; return; }
+        kids.push({ t: h, n, i: inbox });
+        lsSet(LS_KIDS, JSON.stringify(kids));
+        try { history.replaceState(null, '', location.pathname + location.search + kidsHash(kids)); } catch { /* لا يضر */ }
+        idIn.value = '';
+        idMsg.textContent = '';
+        addBox.open = false;
+        render();
+        toast(`تمت إضافة ${n} لصفحتك`, 'ok');
+      } catch {
+        idMsg.className = 'pr-idmsg bad';
+        idMsg.textContent = 'ما وصلنا للمدرسة — تأكد من الإنترنت.';
+      } finally {
+        addBtn.disabled = false;
+      }
+    }
     const allBtn = el('button', { class: 'btn primary big pr-all', type: 'button', hidden: true, onclick: () => request(kids) }, '🚗 وصلت — طلّعوا الكل');
-    const foot = el('p', { class: 'pr-foot' }, 'اضغط وأنت قريب من المدرسة. موقعك يُستخدم على جهازك فقط لحساب المسافة، وما يُحفظ عندنا.');
-    app.append(head, note, allBtn, list, foot);
+    const foot = el('p', { class: 'pr-foot' }, 'اضغط وأنت قريب من المدرسة. موقعك والرقم المدني يُستخدمان على جهازك فقط، وما يُحفظ عندنا منهما شيء.');
+    app.append(head, note, allBtn, list, addBox, foot);
 
     const mins = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
     const openNow = () => !pub || pub.h1 == null || pub.h2 == null || (mins() >= pub.h1 && mins() <= pub.h2);
@@ -1044,9 +1103,10 @@
     function render() {
       if (!kids.length) {
         note.className = 'pr-note warn';
-        note.textContent = 'ما فيه أحد في هذه الصفحة. افتح الرابط اللي وصلك من المدرسة.';
+        note.textContent = 'أضف ولدك برقمه المدني، ومرة وحدة تكفي — جهازك بيتذكّره.';
         list.replaceChildren();
         allBtn.hidden = true;
+        addBox.open = true;
         return;
       }
       const shut = !openNow();
@@ -1663,6 +1723,7 @@ ${parentLink(s.p, s.n)}
       const s = root.settings || {};
       if (!REMOTE || !s.inbox) return Promise.resolve();
       const body = {};
+      if (s.salt) body.s = s.salt;
       if (typeof s.lat === 'number' && typeof s.lng === 'number') { body.lat = s.lat; body.lng = s.lng; }
       if (typeof s.rad === 'number') body.r = s.rad;
       if (typeof s.h1 === 'number') body.h1 = s.h1;
@@ -1699,14 +1760,21 @@ ${parentLink(s.p, s.n)}
           el('button', {
             class: 'btn primary', type: 'button',
             onclick: () => {
-              write('PATCH', 'settings', { inbox: newKey(), h1: 11 * 60, h2: 15 * 60, rad: 1000 });
+              write('PATCH', 'settings', { inbox: newKey(), salt: newKey().slice(0, 16), h1: 11 * 60, h2: 15 * 60, rad: 1000 });
               publishPub();
-              toast('تم التفعيل — اضبط موقع المدرسة وولّد الروابط', 'ok');
+              toast('تم التفعيل — اضبط موقع المدرسة وحمّل الأرقام المدنية', 'ok');
             },
           }, 'فعّل طلبات أولياء الأمور'));
       }
       const withTok = students().filter((x) => x.p);
+      const withId = students().filter((x) => x.h);
       const geo = typeof s.lat === 'number' && typeof s.lng === 'number';
+      // مدرسة فعّلت قبل أن يوجد الملح: نولّده مرة واحدة بلا ما يحس أحد
+      if (!s.salt) { write('PATCH', 'settings', { salt: newKey().slice(0, 16) }); publishPub(); }
+      const openLink = location.href.split('#')[0] + '#' + new URLSearchParams({ i: String(s.inbox) }).toString();
+      const openMsg = `رابط طلب الانصراف — ${CFG.schoolName || 'المدرسة'}:
+${openLink}
+افتحه وأضف ولدك برقمه المدني مرة وحدة، وبعدها اضغط الزر وأنت قريب من المدرسة فينزل اسمه على شاشة مبناه.`;
       const timeIn = (key, val) => el('input', {
         type: 'time', class: 'num', value: hhmm(val), 'aria-label': key === 'h1' ? 'من' : 'إلى',
         onchange: (e) => {
@@ -1719,6 +1787,10 @@ ${parentLink(s.p, s.n)}
       return el('section', { class: 'card' },
         el('h2', null, 'طلبات أولياء الأمور'),
         el('p', { class: 'hint' }, 'الطلب ينادي الطالب مباشرة بوسم 👪، وتقدر تلغيه من صفحة النداء مثل أي نداء.'),
+        el('div', { class: 'link-row' },
+          el('a', { href: openLink, target: '_blank', rel: 'noopener' }, '🔗 رابط أولياء الأمور — واحد للجميع'),
+          el('button', { class: 'btn small', type: 'button', onclick: () => copy(openMsg, 'رسالة الرابط') }, 'نسخ الرسالة')),
+        el('p', { class: 'hint' }, arNum(`ولي الأمر يضيف ولده برقمه المدني. مسجّل عندك الحين: ${withId.length} من ${students().length} طالب.`)),
         el('div', { class: 'inline wrap' },
           el('span', null, 'موقع المدرسة:'),
           el('b', null, geo ? arNum(`${s.lat.toFixed(5)}، ${s.lng.toFixed(5)}`) : 'ما انضبط'),
@@ -1777,6 +1849,126 @@ ${parentLink(s.p, s.n)}
             .map((x) => el('div', { class: 'link-row' },
               el('a', { href: parentLink(x.p, x.n), target: '_blank', rel: 'noopener' }, arNum(`${x.n} — ${x.c}`)),
               el('button', { class: 'btn small', type: 'button', onclick: () => copy(parentMsg(x), `رسالة ${x.n}`) }, 'نسخ الرسالة'))))) : '');
+    }
+
+    // ---------- تحميل الأرقام المدنية ----------
+    // الرقم لا يُحفظ: يتحوّل بصمةً على هذا الجهاز، والبصمة وحدها تُكتب.
+    // فلو تسرّبت قاعدة البيانات كاملة، ما فيها رقم مدني واحد.
+    function civilCard() {
+      const s = root.settings || {};
+      if (!s.inbox) return '';
+      const ta = el('textarea', {
+        rows: '6', dir: 'auto',
+        placeholder: 'كل سطر: اسم الطالب ثم رقمه المدني\nمثال: عبدالله محمد الصالح، 312050100123',
+      });
+      const out = el('div');
+
+      function preview() {
+        const pool = students().sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n));
+        const byId = Object.fromEntries(pool.map((x) => [x.id, x]));
+        const lines = [];
+        for (const raw of ta.value.split('\n')) {
+          const digits = (arDigits(raw).match(/\d[\d\s-]{7,}/) || [''])[0].replace(/\D/g, '');
+          const name = arDigits(raw).replace(/\d[\d\s-]{7,}/, '').replace(/[،,\t]+/g, ' ').trim();
+          if (digits.length >= 8 && name) lines.push({ name, digits, w: nameWords(name) });
+        }
+        if (!lines.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه سطر فيه اسم ورقم مدني.')); return; }
+        reviewing = true;
+
+        const pairs = [];
+        lines.forEach((ln, li) => pool.forEach((st) => {
+          const sc = nameScore(nameWords(st.n), ln.w);
+          if (sc >= 60) pairs.push({ li, id: st.id, sc });
+        }));
+        pairs.sort((a, b) => b.sc - a.sc);
+        // نفس قاعدة أداة الأسماء: التعادل غموض يُترك لليد، لا مطابقة
+        const bestLine = new Map();
+        const bestStu = new Map();
+        for (const p of pairs) {
+          const L = bestLine.get(p.li);
+          if (!L || p.sc > L.sc) bestLine.set(p.li, { sc: p.sc, ties: 1 }); else if (p.sc === L.sc) L.ties++;
+          const S = bestStu.get(p.id);
+          if (!S || p.sc > S.sc) bestStu.set(p.id, { sc: p.sc, ties: 1 }); else if (p.sc === S.sc) S.ties++;
+        }
+        const tl = new Set();
+        const ts = new Set();
+        for (const p of pairs) {
+          if (tl.has(p.li) || ts.has(p.id)) continue;
+          const L = bestLine.get(p.li);
+          const S = bestStu.get(p.id);
+          const tie = (L && L.ties > 1 && p.sc === L.sc) || (S && S.ties > 1 && p.sc === S.sc);
+          if (tie && p.sc < 100) { tl.add(p.li); lines[p.li].tie = true; continue; }
+          tl.add(p.li); ts.add(p.id);
+          lines[p.li].id = p.id;
+          lines[p.li].sc = p.sc;
+        }
+
+        const rows = lines.map((ln) => {
+          const sel = el('select', { class: 'rn-target', 'aria-label': 'الطالب المقابل' },
+            el('option', { value: '' }, '— تجاهل —'),
+            pool.map((st) => el('option', { value: st.id }, `${st.n} · ${st.c || '—'}`)));
+          sel.value = ln.id || '';
+          const cls = ln.id ? (ln.sc >= 85 ? '' : ' weak') : ' none';
+          return {
+            ln, sel,
+            node: el('div', { class: 'rn-row' + cls },
+              el('span', { class: 'rn-new' }, ln.name,
+                el('small', { class: 'muted' }, ' ••••' + ln.digits.slice(-4)),
+                ln.tie ? el('span', { class: 'rn-tie' }, 'أكثر من طالب يطابق — اختر يدويًا') : null),
+              sel),
+          };
+        });
+        const matched = lines.filter((l) => l.id).length;
+        const left = pool.filter((x) => !x.h && !ts.has(x.id)).length;
+
+        out.replaceChildren(
+          el('div', { class: 'rn-sum' },
+            el('span', null, arNum(`تطابق ${matched} من ${lines.length}`)),
+            lines.length - matched ? el('span', { class: 'bad' }, arNum(`${lines.length - matched} بدون مقابل`)) : null,
+            left ? el('span', { class: 'muted' }, arNum(`${left} طالب بعده بلا رقم`)) : null),
+          el('div', { class: 'rn-out' }, rows.map((r) => r.node)),
+          el('button', {
+            class: 'btn primary big', type: 'button', style: 'margin-top:10px',
+            onclick: async (e) => {
+              const salt = String((root.settings || {}).salt || '');
+              if (!salt) { toast('فعّل طلبات أولياء الأمور أولًا', 'err'); return; }
+              e.target.disabled = true;
+              const patch = {};
+              const reg = {};
+              const used = new Set();
+              let dup = 0;
+              for (const r of rows) {
+                const id = r.sel.value;
+                if (!id || !byId[id]) continue;
+                if (used.has(id)) { dup++; continue; }
+                used.add(id);
+                const h = await idHash(salt, r.ln.digits);
+                if (!h) continue;
+                patch[`${id}/h`] = h;
+                reg[h] = { n: byId[id].n };
+              }
+              e.target.disabled = false;
+              if (dup) { toast(`${names(dup)} مربوطة بنفس الطالب — صحّحها أولًا`, 'err'); return; }
+              const n = Object.keys(patch).length;
+              if (!n) { toast('ما فيه شيء نحفظه'); return; }
+              await registerToks(reg);
+              write('PATCH', 'students', patch);
+              ta.value = '';
+              out.replaceChildren();
+              reviewing = false;
+              toast(arNum(`تم حفظ ${n} رقمًا — بصمات لا أرقام`), 'ok');
+              render();
+            },
+          }, 'احفظ البصمات'));
+      }
+
+      return el('section', { class: 'card' },
+        el('h2', null, 'الأرقام المدنية للطلبة'),
+        el('p', { class: 'hint' }, 'بها يضيف ولي الأمر ولده من الرابط العام. الرقم ما يُحفظ عندنا ولا يطلع من جهازك — يتحوّل بصمة لا يمكن الرجوع منها للرقم.'),
+        ta,
+        el('div', { class: 'inline wrap', style: 'margin-top:8px' },
+          el('button', { class: 'btn primary', type: 'button', onclick: preview }, 'طابِق وراجِع')),
+        out);
     }
 
     function linksCard() {
@@ -2318,6 +2510,7 @@ ${parentLink(s.p, s.n)}
         studentsCard(),
         linksCard(),
         parentsCard(),
+        civilCard(),
         settingsCard(),
         migrateCard(),
         pinCard(),
