@@ -10,6 +10,12 @@
         "settings": {
           "minutes": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 600" },
           "pin": { ".validate": "newData.isString() && newData.val().length <= 12" },
+          "inbox": { ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 40" },
+          "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+          "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+          "rad": { ".validate": "newData.isNumber() && newData.val() >= 100 && newData.val() <= 20000" },
+          "h1": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1440" },
+          "h2": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1440" },
           "$other": { ".validate": false }
         },
         "buildings": {
@@ -30,6 +36,7 @@
             "n": { ".validate": "newData.isString() && newData.val().length <= 60" },
             "c": { ".validate": "newData.isString() && newData.val().length <= 12" },
             "b": { ".validate": "newData.isString() && newData.val().length <= 24" },
+            "p": { ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 40" },
             "$other": { ".validate": false }
           }
         },
@@ -38,9 +45,40 @@
             ".validate": "root.child('schools').child($school).child('students').child($s).exists()",
             "t": { ".validate": "newData.isNumber()" },
             "o": { ".validate": "newData.isNumber()" },
+            "r": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1" },
+            "d": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000" },
             "$other": { ".validate": false }
           }
         },
+        "$other": { ".validate": false }
+      }
+    },
+    "p": {
+      "$tok": {
+        ".write": "!data.exists() && newData.val() === true && $tok.length >= 20 && $tok.length <= 40",
+        ".validate": "newData.val() === true"
+      }
+    },
+    "inbox": {
+      "$k": {
+        ".read": "$k.length >= 20",
+        "$tok": {
+          ".write": "$k.length >= 20 && root.child('p').child($tok).exists()",
+          "t": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
+          "d": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "pub": {
+      "$k": {
+        ".read": "$k.length >= 20",
+        ".write": "$k.length >= 20 && newData.exists()",
+        "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+        "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+        "r": { ".validate": "newData.isNumber() && newData.val() >= 100 && newData.val() <= 20000" },
+        "h1": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1440" },
+        "h2": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1440" },
         "$other": { ".validate": false }
       }
     }

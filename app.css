@@ -575,3 +575,46 @@ body.page-screen {
   .page-screen .card.fresh, .pill.called { animation: none; }
   #toast { transition: none; }
 }
+
+/* ---------- صفحة ولي الأمر ---------- */
+/* صفحة واحدة، زر واحد كبير لكل ولد: تُفتح في السيارة بيد وحدة */
+.page-parent { background: var(--navy); color: #fff; min-height: 100vh; }
+.pr-head {
+  display: flex; align-items: center; gap: 12px;
+  max-width: 560px; margin: 0 auto; padding: 22px 16px 10px;
+  padding-top: max(22px, env(safe-area-inset-top));
+}
+.pr-logo { width: 56px; height: 56px; object-fit: contain; background: #fff; border-radius: 12px; padding: 4px; }
+.pr-ttl { display: flex; flex-direction: column; line-height: 1.25; }
+.pr-ttl strong { font-size: 1.15rem; font-weight: 800; }
+.pr-ttl small { color: var(--teal); font-size: .9rem; }
+.pr-note, .pr-foot, .pr-kids, .pr-all { max-width: 560px; margin-inline: auto; }
+.pr-note { padding: 0 16px; color: var(--teal); font-size: 1rem; margin: 6px auto 14px; }
+.pr-note.warn { color: #ffd479; font-weight: 700; }
+.btn.pr-all {
+  display: block; width: calc(100% - 32px); margin-bottom: 14px; min-height: 54px;
+  /* الصفحة كحلية، وزر «primary» كحليٌّ مثلها فكان يختفي */
+  background: rgba(255,255,255,.12); border: 2px solid var(--teal); color: #fff; font-weight: 800;
+}
+.btn.pr-all[disabled] { opacity: .5; }
+.pr-kids { display: grid; gap: 14px; padding: 0 16px; }
+.pr-kid { display: flex; gap: 8px; align-items: stretch; }
+.pr-btn {
+  flex: 1 1 auto; min-width: 0; min-height: 110px; cursor: pointer;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  border: 0; border-radius: 18px; padding: 16px;
+  background: var(--teal); color: var(--navy-3); text-align: center;
+}
+.pr-btn:active { transform: scale(.99); }
+.pr-name { font-size: 1.6rem; font-weight: 800; line-height: 1.2; overflow-wrap: break-word; }
+.pr-act { font-size: 1.05rem; font-weight: 700; }
+/* الزر المقفل رمادي، إلا إذا كان الطلب قد وصل فيصير أخضر — الترتيب هو ما يرجّح */
+.pr-btn[disabled] { background: #6f6a86; color: #ddd9ea; opacity: 1; cursor: default; }
+.pr-kid.done .pr-btn { background: #1f7a4d; color: #fff; }
+.pr-kid.done .pr-act { color: #bdf0d4; }
+.pr-x {
+  flex: 0 0 44px; border: 1px solid rgba(255,255,255,.28); background: transparent; color: #fff;
+  border-radius: 14px; font-size: 1.1rem; cursor: pointer;
+}
+.pr-foot { padding: 18px 16px 40px; color: #b9b3cf; font-size: .85rem; line-height: 1.7; }
+.plinks { display: grid; gap: 6px; margin-top: 8px; max-height: 340px; overflow: auto; }

@@ -130,7 +130,14 @@
   const ONDEV = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   const dbParam = ONDEV ? P.get('db') : '';
   const DB = (dbParam || CFG.dbUrl || '').replace(/\/+$/, '');
-  const REMOTE = !!(DB && KEY);
+  // صفحة ولي الأمر: رابطها يحمل رمز الطالب ومفتاح صندوق الطلبات فقط، بلا رمز
+  // المدرسة. فلا تقرأ الأسماء ولا تفتح بثًا — تكتب طلبها وتسكّر.
+  // الأولاد محفوظون على جهاز ولي الأمر: يفتح رابط كل ولد مرة، فتصير صفحة واحدة.
+  const LS_KIDS = 'km-kids';
+  const kidsStored = () => { try { const a = JSON.parse(lsGet(LS_KIDS) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+  const PARENT = !!DB && (!!P.get('p')
+    || (!KEY && !P.get('k') && !P.get('v') && kidsStored().length > 0));
+  const REMOTE = !!(DB && KEY) && !PARENT;
 
   function link(v, extra) {
     const p = new URLSearchParams();
@@ -322,9 +329,12 @@
     const resync = () => fetch(`${DB}/schools/${encodeURIComponent(KEY)}/clock.json`, {
       method: 'PUT', body: JSON.stringify(SV),
     }).then(async (r) => {
+      const was = skew;
       syncClock(r);
       const t = Number(await r.text());
       if (Number.isFinite(t) && t > 1e12) skew = t - Date.now();
+      // الساعة تغيّرت بعد أول رسم: نعيد الرسم فورًا بدل شاشة فاضية تنتظر الدورة التالية
+      if (Math.abs(skew - was) > 1000) emit();
     }).catch(() => { /* نعتمد ساعة الجهاز */ });
     resync();
     connect();
@@ -335,7 +345,7 @@
     const wake = () => { if (Date.now() - lastBeat > 20000) { setStatus('off'); resync(); connect(); } };
     window.addEventListener('online', wake);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
-  } else {
+  } else if (!PARENT) {
     loadLocal();
     try { bc = new BroadcastChannel('km'); bc.onmessage = () => { loadLocal(); emit(); }; } catch { bc = null; }
     window.addEventListener('storage', (e) => { if (e.key === LS_STATE) { loadLocal(); emit(); } });
@@ -431,9 +441,76 @@
     if (!c || typeof c.t !== 'number' || !isToday(c.t)) return { st: 'none' };
     if (typeof c.o === 'number') return { st: 'out', t: c.t, o: c.o };
     const m = minutes();
-    if (m > 0 && now() - c.t > m * 60000) return { st: 'called', t: c.t, late: true };
-    return { st: 'called', t: c.t };
+    // r: طلب ولي الأمر لا نداء المواقف — نميّزه في العرض
+    if (m > 0 && now() - c.t > m * 60000) return { st: 'called', t: c.t, r: c.r, late: true };
+    return { st: 'called', t: c.t, r: c.r };
   }
+
+  // ---------- صندوق طلبات أولياء الأمور ----------
+  // ولي الأمر يكتب في صندوق منفصل لا يعرف رمز المدرسة. أي جهاز مدرسة مفتوح
+  // يحوّل الطلب إلى نداء ثم يمسحه من الصندوق — وكلما قصر عمر الطلب في الصندوق
+  // قلّ ما يراه غيره. التكرار غير ضار: النداء نفسه والحذف مرة واحدة يكفي.
+  const REQ_MAX_AGE = 10 * 60000;
+  const inWindow = (t) => {
+    const s = root.settings || {};
+    if (typeof s.h1 !== 'number' || typeof s.h2 !== 'number') return true;
+    const d = new Date(t);
+    const m = d.getHours() * 60 + d.getMinutes();
+    return m >= s.h1 && m <= s.h2;
+  };
+  const studentByTok = (tok) => Object.keys(root.students || {})
+    .find((id) => root.students[id] && root.students[id].p === tok);
+
+  let inboxEs = null;
+  let inboxKey = null;
+  const reqSeen = new Set();
+
+  function dropReq(k, tok) {
+    return fetch(`${DB}/inbox/${encodeURIComponent(k)}/${encodeURIComponent(tok)}.json`, { method: 'DELETE' })
+      .catch(() => { /* يعيد جهاز آخر المحاولة */ });
+  }
+
+  function applyReq(k, tok, v) {
+    const id = studentByTok(tok);
+    // رمز مجهول أو قديم أو طلب بائت: نمسحه ولا ننادي
+    if (!id || !inWindow(v.t) || now() - v.t > REQ_MAX_AGE) { dropReq(k, tok); return; }
+    if (stateOf(id).st === 'none') {
+      const call = { t: SV, r: 1 };
+      if (typeof v.d === 'number') call.d = v.d;
+      write('PUT', `calls/${id}`, call);
+    }
+    dropReq(k, tok);
+  }
+
+  function queueReq(k, tok, v) {
+    if (!tok || !v || typeof v.t !== 'number' || reqSeen.has(tok)) return;
+    reqSeen.add(tok);
+    // تأخير عشوائي صغير حتى لا تتسابق أربع شاشات على نفس الكتابة في اللحظة نفسها
+    setTimeout(() => { reqSeen.delete(tok); applyReq(k, tok, v); }, 150 + Math.random() * 1200);
+  }
+
+  function inboxWatch() {
+    if (!REMOTE || !ready) return;
+    const k = String((root.settings || {}).inbox || '');
+    if (k === inboxKey) return;
+    inboxKey = k;
+    if (inboxEs) { inboxEs.close(); inboxEs = null; }
+    if (!k) return;
+    const cur = new EventSource(`${DB}/inbox/${encodeURIComponent(k)}.json`);
+    inboxEs = cur;
+    const take = (path, data) => {
+      if (cur !== inboxEs || data == null) return;
+      const p = String(path || '/').replace(/^\/+|\/+$/g, '');
+      if (!p) { for (const [tok, v] of Object.entries(data)) queueReq(k, tok, v); return; }
+      if (p.includes('/')) return; // حقل داخل طلب: ننتظر الطلب كاملًا
+      queueReq(k, p, data);
+    };
+    const on = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } take(m.path, m.data); };
+    cur.addEventListener('put', on);
+    cur.addEventListener('patch', on);
+    cur.addEventListener('cancel', () => { cur.close(); if (cur === inboxEs) { inboxEs = null; inboxKey = null; } });
+  }
+  if (REMOTE) setInterval(inboxWatch, 3000);
 
   // ---------- رموز الدخول ----------
   const NUMW = {
@@ -693,6 +770,7 @@
     app.replaceChildren();
     document.body.className = '';
     window.scrollTo(0, 0);
+    if (P.get('p') || (PARENT && !P.get('v'))) { viewParent(); return; }
     const views = { home: viewHome, call: viewCall, screen: viewScreen, manage: viewManage };
     (views[P.get('v') || 'home'] || viewHome)();
   }
@@ -852,6 +930,160 @@
   }
   const secsLeft = () => Math.max(0, Math.ceil((autoAt - Date.now()) / 1000));
 
+  // ---------- صفحة ولي الأمر ----------
+  // كل ما تعرفه هذه الصفحة: رمز الطالب واسمه من الرابط، ومفتاح صندوق الطلبات.
+  // ما تقرأ بيانات المدرسة، وما تفتح بثًا، وما ترسل موقع أحد إلى أي مكان —
+  // المسافة تُحسب على الجهاز ويُرسل الرقم وحده مع الطلب.
+  const kidsHash = (ks) => {
+    const q = new URLSearchParams();
+    if (dbParam) q.set('db', dbParam);
+    ks.forEach((k) => { q.append('p', k.t); q.append('n', k.n || ''); });
+    if (ks[0] && ks[0].i) q.set('i', ks[0].i);
+    return '#' + q.toString();
+  };
+  const distM = (aLat, aLng, bLat, bLng) => {
+    const R = 6371000, t = Math.PI / 180;
+    const dLat = (bLat - aLat) * t, dLng = (bLng - aLng) * t;
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * t) * Math.cos(bLat * t) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+  };
+  const fmtDist = (m) => (m < 950 ? `${Math.round(m / 50) * 50} متر` : `${(m / 1000).toFixed(1)} كم`);
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const getPos = () => new Promise((res) => {
+    if (!navigator.geolocation) { res(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => res(p.coords), () => res(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+  });
+
+  function viewParent() {
+    document.body.className = 'page-parent';
+    const kids = kidsStored();
+    const inbox = P.get('i') || (kids[0] || {}).i || '';
+    const nms = P.getAll('n');
+    const fresh = [];
+    P.getAll('p').forEach((t, i) => {
+      if (!t) return;
+      const n = (nms[i] || '').trim();
+      const had = kids.find((k) => k.t === t);
+      if (had) { if (n) had.n = n; if (inbox) had.i = inbox; return; }
+      // ولد ثانٍ على صفحة فيها أولاد: نسأل أولًا. رابط وصل بالغلط لولي أمر آخر
+      // ما يصير ولده بضغطة، والتشابه في اللقب لا يعني إخوة.
+      if (kids.length && !confirm(`تضيف ${n || 'هذا الطالب'} لصفحتك مع أولادك؟`)) return;
+      kids.push({ t, n, i: inbox });
+      fresh.push(n || 'الطالب');
+    });
+    if (kids.length) {
+      lsSet(LS_KIDS, JSON.stringify(kids));
+      // نبقي الرابط كاملًا بكل الأولاد: إضافته للشاشة الرئيسية تحفظهم جميعًا،
+      // وحذف ذاكرة المتصفح لا يضيّعهم
+      try { history.replaceState(null, '', location.pathname + location.search + kidsHash(kids)); } catch { /* لا يضر */ }
+    }
+    if (fresh.length) setTimeout(() => toast(`تمت إضافة ${fresh.join(' و')} لصفحتك`, 'ok'), 400);
+
+    let pub = null;
+    let busy = false;
+    const head = el('header', { class: 'pr-head' },
+      el('img', { class: 'pr-logo', src: 'assets/icon-192.png', alt: '' }),
+      el('div', { class: 'pr-ttl' },
+        el('strong', null, CFG.schoolName || 'المدرسة'),
+        el('small', null, 'طلب انصراف')));
+    const note = el('p', { class: 'pr-note' });
+    const list = el('div', { class: 'pr-kids' });
+    const allBtn = el('button', { class: 'btn primary big pr-all', type: 'button', hidden: true, onclick: () => request(kids) }, '🚗 وصلت — طلّعوا الكل');
+    const foot = el('p', { class: 'pr-foot' }, 'اضغط وأنت قريب من المدرسة. موقعك يُستخدم على جهازك فقط لحساب المسافة، وما يُحفظ عندنا.');
+    app.append(head, note, allBtn, list, foot);
+
+    const mins = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+    const openNow = () => !pub || pub.h1 == null || pub.h2 == null || (mins() >= pub.h1 && mins() <= pub.h2);
+    const reqAt = (k) => Number(lsGet('km-req-' + k.t) || 0);
+    const waiting = (k) => { const t = reqAt(k); return t && Date.now() - t < 3 * 60000; };
+
+    function removeKid(k) {
+      if (!confirm(`تشيل ${k.n || 'الطالب'} من صفحتك؟`)) return;
+      const i = kids.indexOf(k);
+      if (i >= 0) kids.splice(i, 1);
+      lsSet(LS_KIDS, JSON.stringify(kids));
+      try { history.replaceState(null, '', location.pathname + location.search + kidsHash(kids)); } catch { /* لا يضر */ }
+      render();
+    }
+
+    async function send(k, d) {
+      const body = { t: SV };
+      if (d != null) body.d = Math.round(d);
+      const r = await fetch(`${DB}/inbox/${encodeURIComponent(k.i || inbox)}/${encodeURIComponent(k.t)}.json`, {
+        method: 'PUT', body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+    }
+
+    async function request(ks) {
+      const list2 = ks.filter((k) => !waiting(k));
+      if (!list2.length) return;
+      busy = true; render();
+      const pos = await getPos();
+      let d = null;
+      if (pos && pub && typeof pub.lat === 'number' && typeof pub.lng === 'number') {
+        d = distM(pos.latitude, pos.longitude, pub.lat, pub.lng);
+      }
+      const rad = (pub && pub.r) || 1000;
+      // الموقع إرشادي لا شرط: جهاز ما ضبط موقعه أو موقف مغطّى ما يوقف ولي أمر واقف عند البوابة
+      if (d != null && d > rad
+        && !confirm(arNum(`أنت على بعد ${fmtDist(d)} عن المدرسة. تبي ترسل الطلب الحين؟`))) {
+        busy = false; render(); return;
+      }
+      try {
+        for (const k of list2) { await send(k, d); lsSet('km-req-' + k.t, String(Date.now())); }
+        toast(list2.length > 1 ? 'وصلت طلباتكم ✓' : 'وصل طلبك ✓', 'ok');
+      } catch {
+        toast('ما وصل الطلب — تأكد من الإنترنت', 'err', { label: 'أعد المحاولة', fn: () => request(list2) });
+      }
+      busy = false; render();
+    }
+
+    function render() {
+      if (!kids.length) {
+        note.className = 'pr-note warn';
+        note.textContent = 'ما فيه أحد في هذه الصفحة. افتح الرابط اللي وصلك من المدرسة.';
+        list.replaceChildren();
+        allBtn.hidden = true;
+        return;
+      }
+      const shut = !openNow();
+      note.className = 'pr-note' + (shut ? ' warn' : '');
+      note.textContent = shut && pub
+        ? arNum(`الطلب يفتح من ${hhmm(pub.h1)} إلى ${hhmm(pub.h2)}`)
+        : 'اضغط أول ما تقرب من المدرسة، فينزل اسم ولدك على شاشة مبناه.';
+      allBtn.hidden = kids.length < 2 || shut;
+      allBtn.disabled = busy || kids.every(waiting);
+      list.replaceChildren(...kids.map((k) => {
+        const w = waiting(k);
+        return el('div', { class: 'pr-kid' + (w ? ' done' : '') },
+          el('button', {
+            class: 'pr-btn', type: 'button',
+            disabled: busy || shut || w ? true : null,
+            onclick: () => request([k]),
+          },
+            el('span', { class: 'pr-name' }, k.n || 'ولدي'),
+            el('span', { class: 'pr-act' }, busy ? 'لحظة…' : w ? `✓ وصل طلبك ${ago(reqAt(k))}` : '🚗 وصلت — طلّعوه')),
+          el('button', {
+            class: 'pr-x', type: 'button', 'aria-label': `شيل ${k.n || 'الطالب'} من صفحتي`,
+            onclick: () => removeKid(k),
+          }, '✕'));
+      }));
+    }
+
+    if (inbox) {
+      fetch(`${DB}/pub/${encodeURIComponent(inbox)}.json`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((v) => { if (v && typeof v === 'object') pub = v; render(); })
+        .catch(() => { /* نمشي بلا مسافة ولا ساعات */ });
+    }
+    render();
+    const iv = setInterval(render, 5000);
+    cleanup = () => clearInterval(iv);
+  }
+
   // ---------- النداء (المواقف) — لكل مبنى نداؤه الخاص ----------
   function viewCall() {
     document.body.className = 'page-call';
@@ -978,7 +1210,7 @@
         .slice(0, 12);
 
       const tile = (s, showB) => {
-        const meta = s.st === 'called' ? `${s.late ? '⚠️ تأخّر' : '⏳ ينتظر'} · ${ago(s.t)}`
+        const meta = s.st === 'called' ? `${s.late ? '⚠️ تأخّر' : s.r ? '👪 طلب ولي الأمر' : '⏳ ينتظر'} · ${ago(s.t)}`
           : s.st === 'out' ? `✓ خرج ${timeFmt.format(s.o)}`
           : showB ? `${s.c} · ${bldName(s.b)}`
           : (onlyCalled || nq ? s.c : '');
@@ -1280,7 +1512,8 @@
         card.querySelector('.card-name').textContent = arNum(s.n);
         // نصغّر الخط للأسماء ذات الكلمات الطويلة بدل كسرها بنص الكلمة
         card.style.setProperty('--fit', String(fitName(s.n)));
-        card.querySelector('.badge').textContent = arNum(multiB ? `${s.c} · ${bldName(s.b)}` : s.c);
+        // 👪 = طلب ولي الأمر لا نداء المواقف
+        card.querySelector('.badge').textContent = arNum((s.r ? '👪 ' : '') + (multiB ? `${s.c} · ${bldName(s.b)}` : s.c));
         card.querySelector('.ago').textContent = waited(s.t);
         card.style.order = String(i);
         card.classList.toggle('latest', i === 0 && now() - s.t < 90000);
@@ -1410,6 +1643,141 @@
       s.value = value || (withAll ? 'all' : (buildings()[0] || {}).id || '');
       return s;
     };
+
+    // ---------- روابط أولياء الأمور ----------
+    // الرابط يحمل رمز الطالب واسمه ومفتاح الصندوق فقط. لو تسرّب، ما فيه اسم
+    // غير اسم صاحبه، ولا يفتح شيئًا من بيانات المدرسة.
+    const parentLink = (tok, n) => {
+      const q = new URLSearchParams();
+      q.append('p', tok);
+      q.append('n', n || '');
+      q.set('i', String((root.settings || {}).inbox || ''));
+      return location.href.split('#')[0] + '#' + q.toString();
+    };
+    const parentMsg = (s) => `رابط طلب انصراف ${s.n} — ${CFG.schoolName || 'المدرسة'}:
+${parentLink(s.p, s.n)}
+افتحه وأنت قريب من المدرسة واضغط الزر، فينزل اسم ولدك على شاشة مبناه. احفظه عندك ولا ترسله لأحد.`;
+
+    // نشر ما يحتاجه أولياء الأمور: إحداثيات المدرسة ونصف القطر وساعات الاستقبال
+    function publishPub() {
+      const s = root.settings || {};
+      if (!REMOTE || !s.inbox) return Promise.resolve();
+      const body = {};
+      if (typeof s.lat === 'number' && typeof s.lng === 'number') { body.lat = s.lat; body.lng = s.lng; }
+      if (typeof s.rad === 'number') body.r = s.rad;
+      if (typeof s.h1 === 'number') body.h1 = s.h1;
+      if (typeof s.h2 === 'number') body.h2 = s.h2;
+      return fetch(`${DB}/pub/${encodeURIComponent(s.inbox)}.json`, { method: 'PUT', body: JSON.stringify(body) })
+        .catch(() => toast('ما انحفظت إعدادات أولياء الأمور — تأكد من الإنترنت', 'err'));
+    }
+
+    // الرموز تُسجَّل في فهرس عام لا يُقرأ، وجوده وحده يجعل القواعد تقبل الطلب
+    function registerToks(map) {
+      if (!REMOTE) return Promise.resolve();
+      return fetch(`${DB}/p.json`, { method: 'PATCH', body: JSON.stringify(map) })
+        .catch(() => toast('ما انحفظت الرموز — تأكد من الإنترنت', 'err'));
+    }
+
+    async function makeToks(all) {
+      const list = students().filter((s) => all || !s.p);
+      if (!list.length) { toast('كل الطلبة عندهم روابط', 'ok'); return; }
+      const pat = {};
+      const reg = {};
+      for (const s of list) { const t = newKey(); pat[`${s.id}/p`] = t; reg[t] = true; }
+      await registerToks(reg);
+      write('PATCH', 'students', pat);
+      toast(`تم توليد ${plural(list.length, 'رابط واحد', 'رابطين', 'روابط', 'رابطًا')}`, 'ok');
+    }
+
+    function parentsCard() {
+      const s = root.settings || {};
+      const on = !!s.inbox;
+      if (!on) {
+        return el('section', { class: 'card' },
+          el('h2', null, 'طلبات أولياء الأمور'),
+          el('p', { class: 'hint' }, 'لكل طالب رابط سري يُرسل لولي أمره. يضغط الزر وهو قريب من المدرسة، فينزل اسم ولده على شاشة مبناه مباشرة بوسم 👪.'),
+          el('button', {
+            class: 'btn primary', type: 'button',
+            onclick: () => {
+              write('PATCH', 'settings', { inbox: newKey(), h1: 11 * 60, h2: 15 * 60, rad: 1000 });
+              publishPub();
+              toast('تم التفعيل — اضبط موقع المدرسة وولّد الروابط', 'ok');
+            },
+          }, 'فعّل طلبات أولياء الأمور'));
+      }
+      const withTok = students().filter((x) => x.p);
+      const geo = typeof s.lat === 'number' && typeof s.lng === 'number';
+      const timeIn = (key, val) => el('input', {
+        type: 'time', class: 'num', value: hhmm(val), 'aria-label': key === 'h1' ? 'من' : 'إلى',
+        onchange: (e) => {
+          const m = /^(\d{1,2}):(\d{2})$/.exec(e.target.value || '');
+          if (!m) return;
+          write('PATCH', 'settings', { [key]: (+m[1]) * 60 + (+m[2]) });
+          publishPub();
+        },
+      });
+      return el('section', { class: 'card' },
+        el('h2', null, 'طلبات أولياء الأمور'),
+        el('p', { class: 'hint' }, 'الطلب ينادي الطالب مباشرة بوسم 👪، وتقدر تلغيه من صفحة النداء مثل أي نداء.'),
+        el('div', { class: 'inline wrap' },
+          el('span', null, 'موقع المدرسة:'),
+          el('b', null, geo ? arNum(`${s.lat.toFixed(5)}، ${s.lng.toFixed(5)}`) : 'ما انضبط'),
+          el('button', {
+            class: 'btn small', type: 'button',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              const pos = await getPos();
+              e.target.disabled = false;
+              if (!pos) { toast('ما قدرنا نقرأ موقعك — افتح إذن الموقع وجرّب مرة ثانية', 'err'); return; }
+              write('PATCH', 'settings', { lat: +pos.latitude.toFixed(6), lng: +pos.longitude.toFixed(6) });
+              publishPub();
+              toast('تم ضبط موقع المدرسة', 'ok');
+            },
+          }, '📍 استخدم موقعي الحالي'),
+          geo ? el('a', {
+            class: 'btn small ghost', target: '_blank', rel: 'noopener',
+            href: `https://www.google.com/maps?q=${s.lat},${s.lng}`,
+          }, 'تأكد على الخريطة') : ''),
+        el('p', { class: 'hint' }, 'اضبطه وأنت في المدرسة. بدونه يشتغل الطلب بلا حساب مسافة.'),
+        el('div', { class: 'inline wrap' },
+          el('span', null, 'يحذّر إذا كان أبعد من'),
+          el('input', {
+            type: 'number', min: '100', max: '20000', step: '100', class: 'num', 'aria-label': 'نصف القطر بالمتر',
+            value: String(typeof s.rad === 'number' ? s.rad : 1000),
+            onchange: (e) => {
+              const v = Math.min(20000, Math.max(100, Number(e.target.value) || 1000));
+              e.target.value = String(v);
+              write('PATCH', 'settings', { rad: v });
+              publishPub();
+            },
+          }),
+          el('span', null, 'متر')),
+        el('div', { class: 'inline wrap' },
+          el('span', null, 'الطلبات تُقبل من'), timeIn('h1', typeof s.h1 === 'number' ? s.h1 : 11 * 60),
+          el('span', null, 'إلى'), timeIn('h2', typeof s.h2 === 'number' ? s.h2 : 15 * 60),
+          el('span', { class: 'muted' }, '(خارجها يُرفض الطلب)')),
+        el('div', { class: 'inline wrap' },
+          el('button', { class: 'btn primary', type: 'button', onclick: () => makeToks(false) },
+            arNum(`أنشئ روابط الجدد (${students().length - withTok.length})`)),
+          withTok.length ? el('button', {
+            class: 'btn', type: 'button',
+            onclick: () => copy(withTok.sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n)).map(parentMsg).join('\n\n———\n\n'), 'كل الرسائل'),
+          }, arNum(`انسخ كل الرسائل (${withTok.length})`)) : '',
+          withTok.length ? el('button', {
+            class: 'btn ghost danger', type: 'button',
+            onclick: () => {
+              if (!confirm('كل الروابط القديمة بتبطل، ولازم ترسل روابط جديدة لكل ولي أمر. متأكد؟')) return;
+              makeToks(true);
+            },
+          }, 'جدّد كل الروابط') : ''),
+        withTok.length ? el('details', keepOpen('plinks'),
+          el('summary', null, arNum(`روابط الطلبة (${withTok.length})`)),
+          el('div', { class: 'plinks' }, withTok
+            .sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n))
+            .map((x) => el('div', { class: 'link-row' },
+              el('a', { href: parentLink(x.p, x.n), target: '_blank', rel: 'noopener' }, arNum(`${x.n} — ${x.c}`)),
+              el('button', { class: 'btn small', type: 'button', onclick: () => copy(parentMsg(x), `رسالة ${x.n}`) }, 'نسخ الرسالة'))))) : '');
+    }
 
     function linksCard() {
       const row = (label, url) => el('div', { class: 'link-row' },
@@ -1949,6 +2317,7 @@
         moveClassCard(),
         studentsCard(),
         linksCard(),
+        parentsCard(),
         settingsCard(),
         migrateCard(),
         pinCard(),
