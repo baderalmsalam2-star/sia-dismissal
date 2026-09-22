@@ -2202,7 +2202,8 @@ ${openLink}
       };
       const searchIn = el('input', {
         type: 'search', placeholder: 'بحث…', value: fq, 'aria-label': 'بحث في الطلبة',
-        oninput: (e) => { fq = e.target.value; applyFilter(); },
+        // البحث يفتح القائمة المطوية، وإلا بحث ولا شاف نتيجة
+        oninput: (e) => { fq = e.target.value; box.open = true; applyFilter(); },
       });
 
       // إضافة طالب
@@ -2220,12 +2221,10 @@ ${openLink}
       };
       nName.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
 
-      const card = el('section', { class: 'card' },
-        el('h2', null, 'الطلبة ', el('span', { class: 'muted' }, `(${list.length})`)),
-        el('datalist', { id: 'classlist' }, classesOf(null).map((c) => el('option', { value: c }))),
-        el('div', { class: 'add-row' }, nName, nClass, nB, el('button', { class: 'btn primary', type: 'button', onclick: add }, 'إضافة')),
-        el('div', { class: 'inline wrap filters' },
-          bldSelect(fb, (v) => { fb = v; lsSet('km-mb', v); render(); }, true), searchIn),
+      // ٣٠٠ طالب في قائمة مفتوحة تدفن بقية الصفحة، فتُطوى وتُفتح عند الحاجة
+      const kp = keepOpen('stulist');
+      const box = el('details', { class: 'stu-box', ...kp, open: kp.open || (fq ? true : null) },
+        el('summary', null, arNum(`اعرض القائمة وعدّل فيها (${list.length})`)),
         el('div', { class: 'mlist' },
           list.map((s) => el('div', { class: 'mrow', 'data-q': norm(s.n) + '|' + norm(s.c) },
             el('input', {
@@ -2241,6 +2240,13 @@ ${openLink}
               class: 'btn small ghost danger', type: 'button', 'aria-label': `حذف ${s.n}`,
               onclick: () => { if (confirm(`حذف ${s.n} من القائمة؟`)) { write('DELETE', `students/${s.id}`); write('DELETE', `calls/${s.id}`); } },
             }, 'حذف')))));
+      const card = el('section', { class: 'card' },
+        el('h2', null, 'الطلبة ', el('span', { class: 'muted' }, `(${list.length})`)),
+        el('datalist', { id: 'classlist' }, classesOf(null).map((c) => el('option', { value: c }))),
+        el('div', { class: 'add-row' }, nName, nClass, nB, el('button', { class: 'btn primary', type: 'button', onclick: add }, 'إضافة')),
+        el('div', { class: 'inline wrap filters' },
+          bldSelect(fb, (v) => { fb = v; lsSet('km-mb', v); render(); }, true), searchIn),
+        box);
       setTimeout(applyFilter, 0);
       return card;
     }

@@ -627,3 +627,11 @@ body.page-screen {
 .pr-add .btn { min-height: 48px; background: var(--teal); border-color: var(--teal); color: var(--navy-3); font-weight: 800; }
 .pr-idmsg { margin: 8px 2px 0; font-size: .95rem; color: var(--teal); min-height: 1.2em; }
 .pr-idmsg.bad { color: #ffd479; font-weight: 700; }
+
+/* قائمة الطلبة مطوية: ٣٠٠ صف مفتوح يدفن بقية صفحة التوزيع */
+.stu-box > summary {
+  cursor: pointer; padding: 12px 6px; font-weight: 800; color: var(--navy);
+  border-top: 1px solid var(--line); margin-top: 8px;
+}
+.stu-box[open] > summary { color: var(--teal-2); }
+.stu-box .mlist { max-height: 60vh; overflow: auto; }
