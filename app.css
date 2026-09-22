@@ -635,3 +635,10 @@ body.page-screen {
 }
 .stu-box[open] > summary { color: var(--teal-2); }
 .stu-box .mlist { max-height: 60vh; overflow: auto; }
+
+/* نتيجة فحص سلسلة أولياء الأمور */
+.pcheck { display: grid; gap: 4px; margin: 10px 0 0; }
+.pcheck:empty { display: none; }
+.pcheck-row { font-size: .95rem; line-height: 1.6; }
+.pcheck-row.ok { color: var(--ok); }
+.pcheck-row.bad { color: var(--danger); font-weight: 700; }

@@ -133,10 +133,10 @@
         "$tok": {
           ".write": "$k.length >= 20 && root.child('p').child($tok).exists()",
           "t": {
-            ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+            ".validate": "newData.isNumber()"
           },
           "d": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+            ".validate": "newData.isNumber() && newData.val() >= 0"
           },
           "$other": {
             ".validate": false

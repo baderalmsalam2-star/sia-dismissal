@@ -266,12 +266,19 @@
         body: method === 'DELETE' ? undefined : JSON.stringify(data),
       });
       syncClock(r);
-      if (!r.ok) throw new Error(String(r.status));
+      if (!r.ok) {
+        let why = '';
+        try { const j = await r.json(); why = j && j.error ? String(j.error) : ''; } catch { /* بلا نص */ }
+        throw new Error(`${r.status}${why ? ' — ' + why : ''}`);
+      }
       return true;
     } catch (err) {
       for (const [p, v] of before) setAt(p, v);
       emit();
-      toast('ما انحفظ — تأكد من الإنترنت', 'err', { label: 'أعد المحاولة', fn: () => write(method, path, data) });
+      // رقم الخطأ يفرّق بين شبكة مقطوعة وقاعدة ترفض الكتابة — بدونه نحن عميان
+      const code = String((err && err.message) || '');
+      const why = /^\d{3}/.test(code) ? ` (${code})` : '';
+      toast(`ما انحفظ${why} — تأكد من الإنترنت`, 'err', { label: 'أعد المحاولة', fn: () => write(method, path, data) });
       return false;
     } finally {
       clearTimeout(timer);
@@ -1073,7 +1080,11 @@
       const r = await fetch(`${DB}/inbox/${encodeURIComponent(k.i || inbox)}/${encodeURIComponent(k.t)}.json`, {
         method: 'PUT', body: JSON.stringify(body),
       });
-      if (!r.ok) throw new Error(String(r.status));
+      if (r.ok) return;
+      // الخادم يرد بسبب الرفض؛ إخفاؤه خلف «تأكد من الإنترنت» يخلي العطل بلا دليل
+      let why = '';
+      try { const j = await r.json(); why = j && j.error ? String(j.error) : ''; } catch { /* بلا نص */ }
+      throw new Error(`${r.status}${why ? ' — ' + why : ''}`);
     }
 
     async function request(ks) {
@@ -1094,8 +1105,10 @@
       try {
         for (const k of list2) { await send(k, d); lsSet('km-req-' + k.t, String(Date.now())); }
         toast(list2.length > 1 ? 'وصلت طلباتكم ✓' : 'وصل طلبك ✓', 'ok');
-      } catch {
-        toast('ما وصل الطلب — تأكد من الإنترنت', 'err', { label: 'أعد المحاولة', fn: () => request(list2) });
+      } catch (err) {
+        const why = String((err && err.message) || '').slice(0, 90);
+        toast(why ? `ما وصل الطلب (${why})` : 'ما وصل الطلب — تأكد من الإنترنت', 'err',
+          { label: 'أعد المحاولة', fn: () => request(list2) });
       }
       busy = false; render();
     }
@@ -1750,6 +1763,85 @@ ${parentLink(s.p, s.n)}
       toast(`تم توليد ${plural(list.length, 'رابط واحد', 'رابطين', 'روابط', 'رابطًا')}`, 'ok');
     }
 
+    // ---------- فحص سلسلة طلبات أولياء الأمور ----------
+    // ثلاث خطوات على مسارات خارج عقدة المدرسة، وكل خطوة تعرض رد الخادم كما جاء.
+    // الطلب التجريبي يُكتب بوقت قديم عشان يُهمل ولا ينادي طالبًا فعليًا.
+    const checkOut = el('div', { class: 'pcheck' });
+    async function runCheck() {
+      const s2 = root.settings || {};
+      const k = String(s2.inbox || '');
+      const stu = students().find((x) => x.h);
+      const line = (t, ok) => el('div', { class: 'pcheck-row ' + (ok ? 'ok' : 'bad') }, (ok ? '✅ ' : '❌ ') + t);
+      checkOut.replaceChildren(el('div', { class: 'pcheck-row' }, 'جاري الفحص…'));
+      const rows = [];
+      const show = () => checkOut.replaceChildren(...rows);
+      const status = async (r) => {
+        if (r.ok) return '';
+        let why = '';
+        try { const j = await r.json(); why = j && j.error ? String(j.error) : ''; } catch { /* بلا نص */ }
+        return `${r.status}${why ? ' — ' + why : ''}`;
+      };
+
+      // ١) إعدادات أولياء الأمور المنشورة
+      try {
+        const r = await fetch(`${DB}/pub/${encodeURIComponent(k)}.json`, { cache: 'no-store' });
+        const e2 = await status(r);
+        const v = r.ok ? await r.json() : null;
+        rows.push(line(e2 ? `قراءة إعدادات أولياء الأمور: ${e2}` : `إعدادات أولياء الأمور: ${v && v.s ? 'موجودة' : 'ناقصة — اضبط الموقع والساعات'}`, r.ok && v && v.s));
+      } catch (err) { rows.push(line(`قراءة الإعدادات فشلت: ${(err && err.message) || 'شبكة'}`, false)); }
+      show();
+
+      if (!stu) {
+        rows.push(line('ما فيه طالب عنده رقم مدني محفوظ — حمّل الأرقام أولًا', false));
+        show();
+        return;
+      }
+
+      // ٢) فهرس الطالب (هو ما يجعل القواعد تقبل الطلب)
+      try {
+        const r = await fetch(`${DB}/p/${encodeURIComponent(stu.h)}.json`, { cache: 'no-store' });
+        const e2 = await status(r);
+        const v = r.ok ? await r.json() : null;
+        rows.push(line(e2 ? `قراءة فهرس ${stu.n}: ${e2}` : `فهرس ${stu.n}: ${v && v.n ? v.n : 'فاضي'}`, r.ok && !!(v && v.n)));
+      } catch (err) { rows.push(line(`قراءة الفهرس فشلت: ${(err && err.message) || 'شبكة'}`, false)); }
+      show();
+
+      // ٣) وقت الخادم: نفس شكل وقت الطلب (`.sv`) لكن على مسار المدرسة، فلا يؤثر على أحد.
+      // لو رُفض هذا ونجح الطلب الرقمي، فالمشكلة في قبول قيمة وقت الخادم لا في المسار.
+      try {
+        const r = await fetch(`${DB}/schools/${encodeURIComponent(KEY)}/clock.json`, {
+          method: 'PUT', body: JSON.stringify(SV),
+        });
+        const e2 = await status(r);
+        rows.push(line(e2 ? `كتابة وقت الخادم: ${e2}` : 'وقت الخادم يُقبل', r.ok));
+      } catch (err) { rows.push(line(`كتابة وقت الخادم فشلت: ${(err && err.message) || 'شبكة'}`, false)); }
+      show();
+
+      // ٤) كتابة طلب تجريبي (بوقت قديم فلا ينادي أحدًا)
+      let wrote = false;
+      try {
+        const r = await fetch(`${DB}/inbox/${encodeURIComponent(k)}/${encodeURIComponent(stu.h)}.json`, {
+          method: 'PUT', body: JSON.stringify({ t: now() - 30 * 60000 }),
+        });
+        const e2 = await status(r);
+        wrote = r.ok;
+        rows.push(line(e2 ? `كتابة طلب تجريبي: ${e2}` : 'كتابة طلب تجريبي: وصل', r.ok));
+      } catch (err) { rows.push(line(`كتابة الطلب فشلت: ${(err && err.message) || 'شبكة'}`, false)); }
+      show();
+
+      if (wrote) {
+        try {
+          await fetch(`${DB}/inbox/${encodeURIComponent(k)}/${encodeURIComponent(stu.h)}.json`, { method: 'DELETE' });
+          rows.push(line('مسح الطلب التجريبي: تم', true));
+        } catch { rows.push(line('ما انمسح الطلب التجريبي — امسحه من Firebase', false)); }
+        rows.push(line('السلسلة كاملة تشتغل', true));
+      } else {
+        rows.push(el('div', { class: 'pcheck-row bad' },
+          'إذا كان الرد «Permission denied» فالقواعد في Firebase قديمة: الصق firebase-rules.json من جديد وانشرها.'));
+      }
+      show();
+    }
+
     function parentsCard() {
       const s = root.settings || {};
       const on = !!s.inbox;
@@ -1829,6 +1921,7 @@ ${openLink}
           el('span', null, 'إلى'), timeIn('h2', typeof s.h2 === 'number' ? s.h2 : 15 * 60),
           el('span', { class: 'muted' }, '(خارجها يُرفض الطلب)')),
         el('div', { class: 'inline wrap' },
+          el('button', { class: 'btn', type: 'button', onclick: runCheck }, '🩺 افحص السلسلة'),
           el('button', { class: 'btn primary', type: 'button', onclick: () => makeToks(false) },
             arNum(`أنشئ روابط الجدد (${students().length - withTok.length})`)),
           withTok.length ? el('button', {
@@ -1842,6 +1935,7 @@ ${openLink}
               makeToks(true);
             },
           }, 'جدّد كل الروابط') : ''),
+        checkOut,
         withTok.length ? el('details', keepOpen('plinks'),
           el('summary', null, arNum(`روابط الطلبة (${withTok.length})`)),
           el('div', { class: 'plinks' }, withTok
