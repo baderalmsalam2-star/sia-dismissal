@@ -2177,11 +2177,6 @@ ${openLink}
 
     // تحويل رموز الصفوف القديمة (G5A / «بنات G6») إلى الصيغة المعتمدة (BG5A / GG6)
     function migrateCard() {
-      const isNew = (c) => /^[BG]G\d{1,2}[A-Za-z]?$/i.test(String(c || '').trim());
-      const girlsBuilding = (bid) => {
-        const b = bld(bid);
-        return /بنات|بنت/.test(`${b.name || ''} ${b.desc || ''}`);
-      };
       const target = (s) => {
         const c = String(s.c || '').trim();
         if (!c || isNew(c)) return null;
@@ -2266,6 +2261,21 @@ ${openLink}
         cur ? el('p', { class: 'hint' }, '⚠️ اكتبه عندك في مكان آمن — إذا نسيته ما فيه طريقة تسترجعه إلا من قاعدة البيانات مباشرة.') : null,
         el('p', { class: 'hint' }, 'تغيير الرقم يقفل كل الأجهزة الثانية تلقائيًا.'));
     }
+
+    // رمز قديم (G5A) إلى الصيغة المعتمدة (BG5A). الفئة من الرمز، وإلا من المبنى.
+    const isNew = (c) => /^[BG]G\d{1,2}[A-Za-z]?$/i.test(String(c || '').trim());
+    const girlsBuilding = (bid) => {
+      const b = bld(bid);
+      return /بنات|بنت/.test(`${b.name || ''} ${b.desc || ''}`);
+    };
+    const normClass = (c, bid) => {
+      const t = arDigits(String(c || '')).trim();
+      if (!t) return '—';
+      if (isNew(t)) return t.toUpperCase();
+      const i = classInfo(t);
+      if (i.n == null) return t; // رعاية وما شابهها تبقى كما هي
+      return classCode({ n: i.n, sec: i.sec || 'A', girls: i.girls || girlsBuilding(bid) });
+    };
 
     // ---------- الصفوف ----------
     // صفّ جديد يُعلَن مرة فيظهر في كل قوائم الصفوف حتى قبل أن يدخله طالب
@@ -2411,6 +2421,120 @@ ${openLink}
     }
 
     // لصق الأسماء الكاملة (ثلاثية/رباعية) وتحديث أسماء الطلبة الموجودين بدل إضافتهم من جديد
+    // ---------- مقارنة كشف بالقائمة ----------
+    // يجاوب سؤالًا واحدًا: مين في الكشف وما هو عندنا، ومين عندنا وما هو في الكشف،
+    // ومين تغيّر صفّه. المطابقة بالاسم مثل أداة الأسماء، والتعادل يُترك لليد.
+    function compareCard() {
+      const ta = el('textarea', {
+        rows: '6', dir: 'auto',
+        placeholder: 'الصق الكشف، كل سطر: الاسم ثم الصف\nمثال: أحمد خداده، G1A',
+      });
+      const bSel = bldSelect(fb === 'all' ? null : fb, () => {}, false);
+      const out = el('div');
+
+      function run() {
+        const bid = bSel.value;
+        const pool = students().filter((s) => s.b === bid)
+          .sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n));
+        const lines = [];
+        for (const raw of ta.value.split('\n')) {
+          const [n, c] = raw.split(/[،,\t]/).map((x) => (x || '').replace(/^[\s*\-•\d.)٠-٩]+/, '').trim());
+          if (n && n.length > 2) lines.push({ name: n, cls: (c || '').trim(), w: nameWords(n) });
+        }
+        if (!lines.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه أسماء في المربع.')); return; }
+        reviewing = true;
+
+        const pairs = [];
+        lines.forEach((ln, li) => pool.forEach((st) => {
+          const sc = nameScore(nameWords(st.n), ln.w);
+          if (sc >= 60) pairs.push({ li, id: st.id, sc });
+        }));
+        pairs.sort((a, b) => b.sc - a.sc);
+        const tl = new Set();
+        const ts = new Set();
+        for (const p2 of pairs) {
+          if (tl.has(p2.li) || ts.has(p2.id)) continue;
+          tl.add(p2.li); ts.add(p2.id);
+          lines[p2.li].id = p2.id;
+          lines[p2.li].sc = p2.sc;
+        }
+        const byId = Object.fromEntries(pool.map((x) => [x.id, x]));
+        const missing = lines.filter((l) => !l.id);
+        const extra = pool.filter((x) => !ts.has(x.id));
+        const moved = lines.filter((l) => l.id && l.cls
+          && normClass(l.cls, bid) !== String(byId[l.id].c || '').toUpperCase());
+
+        const box = (title, cls, kids) => el('div', { class: 'cmp-box ' + cls }, el('h3', null, title), kids);
+        const rows = missing.map((l) => {
+          const cb = el('input', { type: 'checkbox', checked: true, 'aria-label': `أضف ${l.name}` });
+          l.cb = cb;
+          return el('label', { class: 'cmp-row' }, cb,
+            el('span', null, l.name, el('small', { class: 'muted' }, ' ' + normClass(l.cls, bid))));
+        });
+
+        // replaceChildren يطبع "null" نصًّا لو مرّرناه، فنصفّي الأقسام الفارغة
+        out.replaceChildren(...[
+          el('div', { class: 'rn-sum' },
+            el('span', null, arNum(`الكشف ${lines.length}`)),
+            el('span', null, arNum(`مطابق ${lines.length - missing.length}`)),
+            missing.length ? el('span', { class: 'bad' }, arNum(`ناقص ${missing.length}`)) : null,
+            extra.length ? el('span', { class: 'bad' }, arNum(`زائد ${extra.length}`)) : null,
+            moved.length ? el('span', { class: 'muted' }, arNum(`صفّه تغيّر ${moved.length}`)) : null),
+          missing.length ? box(arNum(`في الكشف وما هو عندكم (${missing.length})`), 'miss',
+            el('div', null, rows,
+              el('button', {
+                class: 'btn primary', type: 'button', style: 'margin-top:8px',
+                onclick: () => {
+                  const patch = {};
+                  let i = 0;
+                  for (const l of missing) {
+                    if (!l.cb.checked) continue;
+                    patch['s' + Date.now().toString(36) + (i++).toString(36) + Math.random().toString(36).slice(2, 4)] = {
+                      n: l.name, c: normClass(l.cls, bid), b: bid,
+                    };
+                  }
+                  if (!i) { toast('ما فيه أحد مختار'); return; }
+                  write('PATCH', 'students', patch);
+                  ta.value = '';
+                  out.replaceChildren();
+                  reviewing = false;
+                  toast(`تمت إضافة ${pupils(i)}`, 'ok');
+                  render();
+                },
+              }, 'أضف المختارين'))) : null,
+          extra.length ? box(arNum(`عندكم وما هو في الكشف (${extra.length})`), 'extra',
+            el('div', { class: 'cmp-list' }, extra.map((x) => el('div', null, x.n,
+              el('small', { class: 'muted' }, ' ' + (x.c || '—')))))) : null,
+          moved.length ? box(arNum(`صفّه في الكشف غير صفّه عندكم (${moved.length})`), 'moved',
+            el('div', null,
+              el('div', { class: 'cmp-list' }, moved.map((l) => el('div', null, l.name,
+                el('small', { class: 'muted' }, arNum(` ${byId[l.id].c || '—'} ← ${normClass(l.cls, bid)}`))))),
+              el('button', {
+                class: 'btn', type: 'button', style: 'margin-top:8px',
+                onclick: () => {
+                  const patch = {};
+                  for (const l of moved) patch[`${l.id}/c`] = normClass(l.cls, bid);
+                  write('PATCH', 'students', patch);
+                  reviewing = false;
+                  toast(arNum(`تم تصحيح ${moved.length} صفًّا`), 'ok');
+                  render();
+                },
+              }, 'صحّح الصفوف كما في الكشف'))) : null,
+          !missing.length && !extra.length && !moved.length
+            ? el('p', { class: 'hint ok' }, '✅ الكشف مطابق تمامًا لقائمة هذا المبنى.') : null,
+        ].filter(Boolean));
+      }
+
+      return el('section', { class: 'card' },
+        el('h2', null, 'قارن مع كشف'),
+        el('p', { class: 'hint' }, 'الصق كشف المدرسة (اسم وصف في كل سطر) ليقول لك مين ناقص عندكم، ومين عندكم وما هو فيه، ومين تغيّر صفّه. المقارنة داخل مبنى واحد.'),
+        ta,
+        el('div', { class: 'inline wrap', style: 'margin-top:8px' },
+          el('span', null, 'الكشف يخص'), bSel,
+          el('button', { class: 'btn primary', type: 'button', onclick: run }, 'قارن')),
+        out);
+    }
+
     function renameCard() {
       const ta = el('textarea', {
         rows: '6', dir: 'auto',
@@ -2654,6 +2778,7 @@ ${openLink}
         settingsCard(),
         migrateCard(),
         pinCard(),
+        compareCard(),
         renameCard(),
         bulkCard(),
         toolsCard());

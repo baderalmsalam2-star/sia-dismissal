@@ -654,3 +654,14 @@ body.page-screen {
 .cls-chip small { color: var(--muted); font-weight: 500; }
 .cls-chip.empty { background: #fff; border-style: dashed; }
 .cls-x { border: 0; background: transparent; color: var(--danger); cursor: pointer; font-weight: 800; padding: 0 2px; }
+
+/* ---------- مقارنة كشف ---------- */
+.cmp-box { margin-top: 12px; border-inline-start: 4px solid var(--line); padding-inline-start: 10px; }
+.cmp-box h3 { margin: 0 0 6px; font-size: 1rem; color: var(--navy); }
+.cmp-box.miss { border-color: var(--wait); }
+.cmp-box.extra { border-color: var(--danger); }
+.cmp-box.moved { border-color: var(--teal-2); }
+.cmp-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+.cmp-row input { width: 20px; height: 20px; }
+.cmp-list { display: grid; gap: 2px; max-height: 240px; overflow: auto; line-height: 1.7; }
+.hint.ok { color: var(--ok); font-weight: 700; }
