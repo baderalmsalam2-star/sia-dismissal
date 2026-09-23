@@ -112,6 +112,11 @@
         },
         "$other": {
           ".validate": false
+        },
+        "classes": {
+          "$c": {
+            ".validate": "newData.val() === true"
+          }
         }
       }
     },

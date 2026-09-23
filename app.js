@@ -434,11 +434,15 @@
   const bld = (id) => (root.buildings || {})[id] || {};
   const bldName = (id) => bld(id).name || 'بدون مبنى';
   const students = () => Object.entries(root.students || {}).map(([id, s]) => ({ id, ...s }));
+  // الصفوف = صفوف الطلبة + صفوف مُعلَنة بلا طلبة بعد (شعبة جديدة قبل توزيعها)
   const classesOf = (bid) => {
     const set = new Set();
     for (const s of students()) if (!bid || s.b === bid) set.add(s.c || '—');
+    if (!bid) for (const c of Object.keys(root.classes || {})) set.add(c);
     return [...set].sort(cmpClass);
   };
+  // مفاتيح Firebase تمنع هذه الرموز، ولولا المنع لانكسر المسار محليًا كذلك
+  const badClass = (c) => !c || c.length > 12 || /[.#$[\]/]/.test(c);
   // الرقم السري لصفحة التوزيع — فاضي = بدون قفل
   const adminPin = () => String((root.settings || {}).pin || '').trim();
   // الجهاز مفتوح إذا حفظ نفس الرقم الحالي، فتغيير الرقم يقفل كل الأجهزة تلقائيًا
@@ -2263,6 +2267,40 @@ ${openLink}
         el('p', { class: 'hint' }, 'تغيير الرقم يقفل كل الأجهزة الثانية تلقائيًا.'));
     }
 
+    // ---------- الصفوف ----------
+    // صفّ جديد يُعلَن مرة فيظهر في كل قوائم الصفوف حتى قبل أن يدخله طالب
+    function classesCard() {
+      const counts = {};
+      for (const s of students()) counts[s.c || '—'] = (counts[s.c || '—'] || 0) + 1;
+      const declared = root.classes || {};
+      const all = classesOf(null);
+      const inp = el('input', {
+        placeholder: 'رمز الصف (مثل BG1C)', 'aria-label': 'صف جديد', dir: 'auto', class: 'cls-in',
+      });
+      const add = () => {
+        const v = arDigits(inp.value).trim().toUpperCase();
+        if (!v) { inp.focus(); return; }
+        if (badClass(v)) { toast('رمز الصف لا يزيد على ١٢ حرفًا وبلا الرموز . # $ [ ] /', 'err'); return; }
+        if (all.includes(v)) { toast(`${v} موجود أصلًا`); inp.value = ''; return; }
+        write('PATCH', 'classes', { [v]: true });
+        inp.value = '';
+        toast(`تمت إضافة ${v}`, 'ok');
+      };
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+      return el('section', { class: 'card' },
+        el('h2', null, 'الصفوف ', el('span', { class: 'muted' }, `(${all.length})`)),
+        el('p', { class: 'hint' }, 'الصيغة: B للبنين أو G للبنات، ثم G، ثم المرحلة، ثم حرف الشعبة — مثل BG1C. والصف يظهر في قوائم الصفوف فورًا ولو ما فيه طالب بعد.'),
+        el('div', { class: 'inline wrap' }, inp,
+          el('button', { class: 'btn primary', type: 'button', onclick: add }, '+ إضافة صف')),
+        el('div', { class: 'cls-wrap' }, all.map((c) => el('span', { class: 'cls-chip' + (counts[c] ? '' : ' empty') },
+          c, el('small', null, arNum(counts[c] ? `${counts[c]}` : 'فاضي')),
+          // الصف المُعلَن الفاضي وحده يُحذف — الصف الذي فيه طلبة يختفي بنقلهم
+          !counts[c] && declared[c] ? el('button', {
+            class: 'cls-x', type: 'button', 'aria-label': `حذف ${c}`,
+            onclick: () => write('DELETE', `classes/${c}`),
+          }, '✕') : null))));
+    }
+
     function moveClassCard() {
       const cSel = el('select', { 'aria-label': 'الصف' }, classesOf(null).map((c) => el('option', { value: c }, c)));
       const bSel = bldSelect(null, () => {}, false);
@@ -2607,6 +2645,7 @@ ${openLink}
             onclick: () => { seedFill(); toast('تمت التعبئة', 'ok'); },
           }, 'تعبئة القائمة')) : '',
         buildingsCard(),
+        classesCard(),
         moveClassCard(),
         studentsCard(),
         linksCard(),

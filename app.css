@@ -642,3 +642,15 @@ body.page-screen {
 .pcheck-row { font-size: .95rem; line-height: 1.6; }
 .pcheck-row.ok { color: var(--ok); }
 .pcheck-row.bad { color: var(--danger); font-weight: 700; }
+
+/* ---------- الصفوف ---------- */
+.cls-in { max-width: 180px; text-align: center; font-weight: 700; }
+.cls-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cls-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--teal-soft); border: 1px solid var(--teal); border-radius: 999px;
+  padding: 5px 12px; font-weight: 800; color: var(--navy);
+}
+.cls-chip small { color: var(--muted); font-weight: 500; }
+.cls-chip.empty { background: #fff; border-style: dashed; }
+.cls-x { border: 0; background: transparent; color: var(--danger); cursor: pointer; font-weight: 800; padding: 0 2px; }
