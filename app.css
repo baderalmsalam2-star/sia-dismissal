@@ -478,7 +478,7 @@ body.page-screen {
 /* تدرّج أسفل الشبكة يدلّ أن تحتها مزيد من المنتظرين */
 .grid.more { -webkit-mask-image: linear-gradient(to bottom, #000 88%, transparent); mask-image: linear-gradient(to bottom, #000 88%, transparent); }
 .page-screen .card {
-  background: #fff; color: var(--navy-3); border: 0; border-radius: 1vw; cursor: pointer; text-align: start;
+  background: #fff; color: var(--navy-3); border: 0; border-radius: 1vw; text-align: start;
   padding: 1.1vw 1.4vw; display: flex; flex-direction: column; justify-content: center; gap: .5vw;
   border-inline-start: .6vw solid var(--wait);
   box-shadow: 0 .5vw 1.4vw rgba(0,0,0,.25);
@@ -523,7 +523,7 @@ body.page-screen {
 }
 /* وميض محدود بثماني نبضات: يلفت النظر عند النداء ثم يهدأ. الوميض الدائم كان
    يعيد رسم عشرات الحبّات طوال اليوم فيُثقل التلفزيون — واللون البرتقالي كافٍ بعدها */
-.pill.called { background: #ffb547; color: #3a2200; cursor: pointer; animation: blink 1.6s ease-in-out 8; }
+.pill.called { background: #ffb547; color: #3a2200; animation: blink 1.6s ease-in-out 8; }
 .pill.out { background: rgba(87,217,143,.16); color: #9ae6bb; text-decoration: line-through; text-decoration-thickness: 1px; font-weight: 500; }
 @keyframes blink { 50% { box-shadow: 0 0 0 .3vw rgba(255,181,71,.45); } }
 

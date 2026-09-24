@@ -1494,7 +1494,6 @@
     };
     document.addEventListener('keydown', onKey);
 
-    const undoBtn = undoButton('scr-undo', true);
     const pad = scrollPad();
     // شريط إنذار: بدونه يبدو التلفزيون المنقطع مطابقًا للحي — الساعة تمشي والقائمة ثابتة
     const alert = el('div', { class: 'scr-alert', hidden: true });
@@ -1508,7 +1507,7 @@
         el('a', { class: 'scr-home', href: link('home'), title: 'تغيير الرمز' },
           el('img', { class: 'scr-logo', src: 'assets/icon-192.png', alt: 'الرئيسية' })),
         el('div', { class: 'scr-side end' },
-          undoBtn, stats, el('div', { class: 'scr-time' }, clock, dateEl), statusPill())),
+          stats, el('div', { class: 'scr-time' }, clock, dateEl), statusPill())),
       alert, body, notFound, startBtn, pad);
 
     const cards = new Map();
@@ -1576,11 +1575,12 @@
         let card = cards.get(s.id);
         if (!card || card.dataset.t !== String(s.t)) {
           if (card) card.remove();
-          card = el('button', { class: 'card' + (first ? '' : ' fresh'), type: 'button', title: 'اضغط عند خروج الطالب' },
+          // الشاشة للعرض فقط: تسجيل الخروج من يد المسؤول في المواقف وحده،
+          // فلمسة عابرة على تلفزيون أو على جوال معلمة ما تُخرج طالبًا
+          card = el('div', { class: 'card' + (first ? '' : ' fresh') },
             el('span', { class: 'card-name' }),
             el('span', { class: 'card-meta' }, el('span', { class: 'badge' }), el('span', { class: 'ago' })));
           card.dataset.t = String(s.t);
-          card.addEventListener('click', () => markOut(root.students[s.id] ? { id: s.id, ...root.students[s.id] } : s));
           cards.set(s.id, card);
           cardsWrap.append(card);
           // الجرس للنداءات الحقيقية فقط. البطاقة قد يُعاد بناؤها لأسباب أخرى
@@ -1631,12 +1631,9 @@
           const bset = multiB ? [...new Set(items.map((s) => bldName(s.b)))].join(' + ') : '';
           return el('div', { class: 'rgroup' },
             el('h3', null, g, el('small', null, `${outN}/${items.length} خرج${bset ? ' · ' + bset : ''}`)),
-            // المنتظر زر حقيقي لا span: يصله ريموت التلفزيون ولوحة المفاتيح وقارئ الشاشة
-            el('div', { class: 'pills' }, items.map((s) => el(s.st === 'called' ? 'button' : 'span', {
+            el('div', { class: 'pills' }, items.map((s) => el('span', {
               class: 'pill ' + s.st,
-              type: s.st === 'called' ? 'button' : null,
-              title: s.st === 'out' ? `خرج ${timeFmt.format(s.o)}` : s.st === 'called' ? 'ينتظر الخروج — اضغط عند خروجه' : '',
-              onclick: s.st === 'called' ? () => markOut({ id: s.id, ...root.students[s.id] }) : null,
+              title: s.st === 'out' ? `خرج ${timeFmt.format(s.o)}` : s.st === 'called' ? 'ينتظر الخروج' : '',
             }, s.st === 'out' ? '✓ ' : '', s.n))));
         }));
         roster.scrollTop = rosterTop;
