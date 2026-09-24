@@ -2164,7 +2164,7 @@ ${openLink}
 
     function settingsCard() {
       return el('section', { class: 'card' },
-        el('h2', null, 'تنبيه الانتظار الطويل'),
+        el('h2', null, 'الإعدادات والأدوات'),
         el('div', { class: 'inline wrap' },
           el('span', null, 'إذا ما أحد ضغط "خرج"، يُعلَّم الطالب متأخرًا بعد'),
           el('input', {
@@ -2394,175 +2394,29 @@ ${openLink}
       return card;
     }
 
-    function bulkCard() {
-      const ta = el('textarea', { rows: '5', placeholder: 'كل سطر اسم طالب\nأو: الاسم، الصف' });
-      const cls = el('input', { placeholder: 'الصف الافتراضي', list: 'classlist' });
-      const b = bldSelect(null, () => {}, false);
-      return el('section', { class: 'card' },
-        el('h2', null, 'إضافة مجموعة أسماء مرة وحدة'),
-        ta,
-        el('div', { class: 'inline wrap' }, cls, b,
-          el('button', {
-            class: 'btn primary', type: 'button',
-            onclick: () => {
-              const patch = {};
-              let i = 0;
-              for (const line of ta.value.split('\n')) {
-                const [n, c] = line.split(/[،,\t]/).map((x) => (x || '').replace(/^[\s*\-•\d.)٠-٩]+/, '').trim());
-                if (!n) continue;
-                patch['s' + Date.now().toString(36) + (i++).toString(36) + Math.random().toString(36).slice(2, 4)] = { n, c: c || cls.value.trim() || '—', b: b.value };
-              }
-              if (!i) { toast('ما فيه أسماء'); return; }
-              write('PATCH', 'students', patch);
-              ta.value = '';
-              toast(`تمت إضافة ${names(i)}`, 'ok');
-            },
-          }, 'إضافة')));
-    }
-
-    // لصق الأسماء الكاملة (ثلاثية/رباعية) وتحديث أسماء الطلبة الموجودين بدل إضافتهم من جديد
-    // ---------- مقارنة كشف بالقائمة ----------
-    // يجاوب سؤالًا واحدًا: مين في الكشف وما هو عندنا، ومين عندنا وما هو في الكشف،
-    // ومين تغيّر صفّه. المطابقة بالاسم مثل أداة الأسماء، والتعادل يُترك لليد.
-    function compareCard() {
+    // ---------- لصق قائمة (أداة واحدة بدل ثلاث) ----------
+    // كانت ثلاث بطاقات تفعل الشيء نفسه: إضافة مجموعة، وتحديث الأسماء، ومقارنة كشف.
+    // كلها «الصق أسماء وطابقها بالموجود»، والفرق فقط في ما تفعله بالنتيجة.
+    function pasteBox() {
       const ta = el('textarea', {
         rows: '6', dir: 'auto',
-        placeholder: 'الصق الكشف، كل سطر: الاسم ثم الصف\nمثال: أحمد خداده، G1A',
+        placeholder: 'كل سطر: الاسم ثم الصف\nمثال: أحمد خداده، G1A\n(الصف اختياري)',
       });
       const bSel = bldSelect(fb === 'all' ? null : fb, () => {}, false);
+      const defCls = el('input', { class: 'cls-in', placeholder: 'صف افتراضي', list: 'classlist', 'aria-label': 'صف افتراضي لمن ما له صف' });
       const out = el('div');
 
-      function run() {
-        const bid = bSel.value;
-        const pool = students().filter((s) => s.b === bid)
-          .sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n));
-        const lines = [];
-        for (const raw of ta.value.split('\n')) {
-          const [n, c] = raw.split(/[،,\t]/).map((x) => (x || '').replace(/^[\s*\-•\d.)٠-٩]+/, '').trim());
-          if (n && n.length > 2) lines.push({ name: n, cls: (c || '').trim(), w: nameWords(n) });
-        }
-        if (!lines.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه أسماء في المربع.')); return; }
-        reviewing = true;
-
-        const pairs = [];
-        lines.forEach((ln, li) => pool.forEach((st) => {
-          const sc = nameScore(nameWords(st.n), ln.w);
-          if (sc >= 60) pairs.push({ li, id: st.id, sc });
-        }));
-        pairs.sort((a, b) => b.sc - a.sc);
-        const tl = new Set();
-        const ts = new Set();
-        for (const p2 of pairs) {
-          if (tl.has(p2.li) || ts.has(p2.id)) continue;
-          tl.add(p2.li); ts.add(p2.id);
-          lines[p2.li].id = p2.id;
-          lines[p2.li].sc = p2.sc;
-        }
-        const byId = Object.fromEntries(pool.map((x) => [x.id, x]));
-        const missing = lines.filter((l) => !l.id);
-        const extra = pool.filter((x) => !ts.has(x.id));
-        const moved = lines.filter((l) => l.id && l.cls
-          && normClass(l.cls, bid) !== String(byId[l.id].c || '').toUpperCase());
-
-        const box = (title, cls, kids) => el('div', { class: 'cmp-box ' + cls }, el('h3', null, title), kids);
-        const rows = missing.map((l) => {
-          const cb = el('input', { type: 'checkbox', checked: true, 'aria-label': `أضف ${l.name}` });
-          l.cb = cb;
-          return el('label', { class: 'cmp-row' }, cb,
-            el('span', null, l.name, el('small', { class: 'muted' }, ' ' + normClass(l.cls, bid))));
-        });
-
-        // replaceChildren يطبع "null" نصًّا لو مرّرناه، فنصفّي الأقسام الفارغة
-        out.replaceChildren(...[
-          el('div', { class: 'rn-sum' },
-            el('span', null, arNum(`الكشف ${lines.length}`)),
-            el('span', null, arNum(`مطابق ${lines.length - missing.length}`)),
-            missing.length ? el('span', { class: 'bad' }, arNum(`ناقص ${missing.length}`)) : null,
-            extra.length ? el('span', { class: 'bad' }, arNum(`زائد ${extra.length}`)) : null,
-            moved.length ? el('span', { class: 'muted' }, arNum(`صفّه تغيّر ${moved.length}`)) : null),
-          missing.length ? box(arNum(`في الكشف وما هو عندكم (${missing.length})`), 'miss',
-            el('div', null, rows,
-              el('button', {
-                class: 'btn primary', type: 'button', style: 'margin-top:8px',
-                onclick: () => {
-                  const patch = {};
-                  let i = 0;
-                  for (const l of missing) {
-                    if (!l.cb.checked) continue;
-                    patch['s' + Date.now().toString(36) + (i++).toString(36) + Math.random().toString(36).slice(2, 4)] = {
-                      n: l.name, c: normClass(l.cls, bid), b: bid,
-                    };
-                  }
-                  if (!i) { toast('ما فيه أحد مختار'); return; }
-                  write('PATCH', 'students', patch);
-                  ta.value = '';
-                  out.replaceChildren();
-                  reviewing = false;
-                  toast(`تمت إضافة ${pupils(i)}`, 'ok');
-                  render();
-                },
-              }, 'أضف المختارين'))) : null,
-          extra.length ? box(arNum(`عندكم وما هو في الكشف (${extra.length})`), 'extra',
-            el('div', { class: 'cmp-list' }, extra.map((x) => el('div', null, x.n,
-              el('small', { class: 'muted' }, ' ' + (x.c || '—')))))) : null,
-          moved.length ? box(arNum(`صفّه في الكشف غير صفّه عندكم (${moved.length})`), 'moved',
-            el('div', null,
-              el('div', { class: 'cmp-list' }, moved.map((l) => el('div', null, l.name,
-                el('small', { class: 'muted' }, arNum(` ${byId[l.id].c || '—'} ← ${normClass(l.cls, bid)}`))))),
-              el('button', {
-                class: 'btn', type: 'button', style: 'margin-top:8px',
-                onclick: () => {
-                  const patch = {};
-                  for (const l of moved) patch[`${l.id}/c`] = normClass(l.cls, bid);
-                  write('PATCH', 'students', patch);
-                  reviewing = false;
-                  toast(arNum(`تم تصحيح ${moved.length} صفًّا`), 'ok');
-                  render();
-                },
-              }, 'صحّح الصفوف كما في الكشف'))) : null,
-          !missing.length && !extra.length && !moved.length
-            ? el('p', { class: 'hint ok' }, '✅ الكشف مطابق تمامًا لقائمة هذا المبنى.') : null,
-        ].filter(Boolean));
-      }
-
-      return el('section', { class: 'card' },
-        el('h2', null, 'قارن مع كشف'),
-        el('p', { class: 'hint' }, 'الصق كشف المدرسة (اسم وصف في كل سطر) ليقول لك مين ناقص عندكم، ومين عندكم وما هو فيه، ومين تغيّر صفّه. المقارنة داخل مبنى واحد.'),
-        ta,
-        el('div', { class: 'inline wrap', style: 'margin-top:8px' },
-          el('span', null, 'الكشف يخص'), bSel,
-          el('button', { class: 'btn primary', type: 'button', onclick: run }, 'قارن')),
-        out);
-    }
-
-    function renameCard() {
-      const ta = el('textarea', {
-        rows: '6', dir: 'auto',
-        placeholder: 'الصق الأسماء الكاملة، كل سطر اسم\nمثال: عبدالله محمد فهد الصالح\nأو مع الصف: عبدالله محمد الصالح، G5A',
-      });
-      const scope = bldSelect(fb === 'all' ? null : fb, () => {}, true);
-      const out = el('div');
-      const card = el('section', { class: 'card' },
-        el('h2', null, 'تحديث الأسماء الكاملة'),
-        el('p', { class: 'hint' }, 'يطابق كل اسم مع الطالب الموجود ويحدّث اسمه فقط — ما يضيف أسماء مكررة. راجع المطابقة قبل الحفظ.'),
-        ta,
-        el('div', { class: 'inline wrap', style: 'margin-top:8px' },
-          el('span', null, 'ابحث في'), scope,
-          el('button', { class: 'btn primary', type: 'button', onclick: () => preview() }, 'طابِق وراجِع')),
-        out);
-
-      // قائمة اختيار الطالب — تُعبّأ عند فتحها فقط حتى ما تثقل الجوال
-      function targetSelect(chosenId, pool, byId) {
+      // قائمة الطلبة تُعبّأ عند فتحها فقط: ٣٠٠ خيار في كل سطر تُثقل الجوال
+      function bindSelect(pool, chosen) {
         const label = (st) => `${st.n} · ${st.c || '—'}`;
-        const cur = byId[chosenId];
         const s = el('select', { class: 'rn-target', 'aria-label': 'الطالب المقابل' },
-          el('option', { value: chosenId || '' }, cur ? label(cur) : '— تجاهل —'));
+          el('option', { value: chosen || '' }, chosen && pool.find((x) => x.id === chosen) ? label(pool.find((x) => x.id === chosen)) : '— جديد —'));
         let filled = false;
         const fill = () => {
           if (filled) return;
           filled = true;
           const v = s.value;
-          s.replaceChildren(el('option', { value: '' }, '— تجاهل —'), pool.map((st) => el('option', { value: st.id }, label(st))));
+          s.replaceChildren(el('option', { value: '' }, '— جديد —'), pool.map((st) => el('option', { value: st.id }, label(st))));
           s.value = v;
         };
         s.addEventListener('focus', fill);
@@ -2570,112 +2424,140 @@ ${openLink}
         return s;
       }
 
-      function preview() {
-        const bid = scope.value;
-        const pool = students()
-          .filter((s) => bid === 'all' || s.b === bid)
+      function run() {
+        const bid = bSel.value;
+        const pool = students().filter((s) => s.b === bid)
           .sort((a, b) => cmpClass(a.c, b.c) || cmpText(a.n, b.n));
-        const byId = Object.fromEntries(pool.map((s) => [s.id, s]));
-
+        const byId = Object.fromEntries(pool.map((x) => [x.id, x]));
+        const dflt = defCls.value.trim();
         const lines = [];
         for (const raw of ta.value.split('\n')) {
           const [n, c] = raw.split(/[،,\t]/).map((x) => (x || '').replace(/^[\s*\-•\d.)٠-٩]+/, '').trim());
-          if (n) lines.push({ name: n, cls: (c || '').trim(), w: nameWords(n) });
+          if (n && n.length > 2) lines.push({ name: n, cls: normClass(c || dflt, bid), w: nameWords(n) });
         }
         if (!lines.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه أسماء في المربع.')); return; }
-        if (!pool.length) { out.replaceChildren(el('p', { class: 'hint' }, 'ما فيه طلبة في هذا النطاق.')); return; }
         reviewing = true;
 
-        // نجمع كل الاحتمالات ونوزّعها من الأقوى للأضعف حتى ما يتكرر طالب.
-        // الصف المكتوب في السطر أقوى فاصل بين الإخوة، فنعاقب اختلافه قبل التوزيع.
+        // نوزّع من الأقوى للأضعف حتى لا يتكرر طالب، والصف المختلف يضعف المطابقة
         const pairs = [];
-        lines.forEach((ln, li) => {
-          pool.forEach((st) => {
-            let sc = nameScore(nameWords(st.n), ln.w);
-            if (!sc) return;
-            if (ln.cls && st.c && norm(ln.cls) !== norm(st.c)) sc -= 30;
-            if (sc >= 60) pairs.push({ li, id: st.id, sc });
-          });
-        });
+        lines.forEach((ln, li) => pool.forEach((st) => {
+          let sc = nameScore(nameWords(st.n), ln.w);
+          if (!sc) return;
+          if (ln.cls !== '—' && st.c && norm(ln.cls) !== norm(st.c)) sc -= 30;
+          if (sc >= 60) pairs.push({ li, id: st.id, sc });
+        }));
         pairs.sort((a, b) => b.sc - a.sc);
-        // التعادل غموض لا مطابقة، وله وجهان: مرشّحان لسطر واحد، أو سطران لطالب
-        // واحد (أخوان بنفس الاسم الأول والعائلة). كلاهما يُترك للاختيار اليدوي.
         const bestLine = new Map();
         const bestStu = new Map();
-        for (const p of pairs) {
-          const L = bestLine.get(p.li);
-          if (!L || p.sc > L.sc) bestLine.set(p.li, { sc: p.sc, ties: 1 });
-          else if (p.sc === L.sc) L.ties++;
-          const S = bestStu.get(p.id);
-          if (!S || p.sc > S.sc) bestStu.set(p.id, { sc: p.sc, ties: 1 });
-          else if (p.sc === S.sc) S.ties++;
+        for (const p2 of pairs) {
+          const L = bestLine.get(p2.li);
+          if (!L || p2.sc > L.sc) bestLine.set(p2.li, { sc: p2.sc, ties: 1 }); else if (p2.sc === L.sc) L.ties++;
+          const S = bestStu.get(p2.id);
+          if (!S || p2.sc > S.sc) bestStu.set(p2.id, { sc: p2.sc, ties: 1 }); else if (p2.sc === S.sc) S.ties++;
         }
-        const takenLine = new Set();
-        const takenStu = new Set();
-        for (const p of pairs) {
-          if (takenLine.has(p.li) || takenStu.has(p.id)) continue;
-          const L = bestLine.get(p.li);
-          const S = bestStu.get(p.id);
-          const tie = (L && L.ties > 1 && p.sc === L.sc) || (S && S.ties > 1 && p.sc === S.sc);
-          if (tie && p.sc < 100) { takenLine.add(p.li); lines[p.li].tie = true; continue; }
-          takenLine.add(p.li);
-          takenStu.add(p.id);
-          lines[p.li].id = p.id;
-          lines[p.li].sc = p.sc;
+        const tl = new Set();
+        const ts = new Set();
+        for (const p2 of pairs) {
+          if (tl.has(p2.li) || ts.has(p2.id)) continue;
+          const L = bestLine.get(p2.li);
+          const S = bestStu.get(p2.id);
+          // التعادل غموض لا مطابقة: يُترك «جديدًا» مع تنبيه، وللمستخدم أن يربطه يدويًا
+          const tie = (L && L.ties > 1 && p2.sc === L.sc) || (S && S.ties > 1 && p2.sc === S.sc);
+          if (tie && p2.sc < 100) { tl.add(p2.li); lines[p2.li].tie = true; continue; }
+          tl.add(p2.li); ts.add(p2.id);
+          lines[p2.li].id = p2.id;
+          lines[p2.li].sc = p2.sc;
         }
 
-        const rows = lines.map((ln) => {
-          const sel = targetSelect(ln.id || '', pool, byId);
-          sel.addEventListener('change', () => { ln.manual = true; });
-          const cls = ln.id ? (ln.sc >= 85 ? '' : ' weak') : ' none';
-          const note = ln.tie ? el('span', { class: 'rn-tie' }, 'أكثر من طالب يطابق — اختر يدويًا') : null;
-          return { ln, sel, node: el('div', { class: 'rn-row' + cls }, el('span', { class: 'rn-new' }, ln.name, note), sel) };
+        const fresh = lines.filter((l) => !l.id);
+        const edits = lines.filter((l) => l.id
+          && (byId[l.id].n !== l.name || (l.cls !== '—' && String(byId[l.id].c || '') !== l.cls)));
+        const same = lines.length - fresh.length - edits.length;
+        const extra = pool.filter((x) => !ts.has(x.id));
+
+        const rowsNew = fresh.map((l) => {
+          l.cb = el('input', { type: 'checkbox', checked: true, 'aria-label': `أضف ${l.name}` });
+          l.sel = bindSelect(pool, '');
+          return el('div', { class: 'cmp-row' }, l.cb,
+            el('span', { class: 'cmp-n' }, l.name,
+              el('small', { class: 'muted' }, ' ' + l.cls),
+              l.tie ? el('span', { class: 'rn-tie' }, 'يشبه أكثر من طالب — اربطه يدويًا') : null),
+            l.sel);
         });
-        const matched = lines.filter((l) => l.id).length;
-        const missed = pool.filter((s) => !takenStu.has(s.id));
+        const rowsEdit = edits.map((l) => {
+          l.cb = el('input', { type: 'checkbox', checked: true, 'aria-label': `عدّل ${l.name}` });
+          const st = byId[l.id];
+          const bits = [];
+          if (st.n !== l.name) bits.push(`${st.n} ← ${l.name}`);
+          if (l.cls !== '—' && String(st.c || '') !== l.cls) bits.push(arNum(`${st.c || '—'} ← ${l.cls}`));
+          return el('div', { class: 'cmp-row' }, l.cb, el('span', { class: 'cmp-n' }, bits.join(' · ')));
+        });
 
-        out.replaceChildren(
+        const box = (title, cls, kids) => el('div', { class: 'cmp-box ' + cls }, el('h3', null, title), kids);
+        out.replaceChildren(...[
           el('div', { class: 'rn-sum' },
-            el('span', null, `تطابق ${matched} من ${lines.length}`),
-            lines.filter((l) => l.tie).length ? el('span', { class: 'bad' }, `${lines.filter((l) => l.tie).length} تحتاج اختيارًا يدويًا`) : null,
-            lines.length - matched ? el('span', { class: 'bad' }, `${lines.length - matched} بدون مقابل`) : null,
-            missed.length ? el('span', { class: 'muted' }, `${missed.length} طالب ما وصلهم تحديث`) : null),
-          el('div', { class: 'rn-out' }, rows.map((r) => r.node)),
-          el('button', {
+            el('span', null, arNum(`القائمة ${lines.length}`)),
+            same ? el('span', null, arNum(`مطابق ${same}`)) : null,
+            fresh.length ? el('span', { class: 'bad' }, arNum(`جديد ${fresh.length}`)) : null,
+            edits.length ? el('span', { class: 'muted' }, arNum(`تعديل ${edits.length}`)) : null,
+            extra.length ? el('span', { class: 'muted' }, arNum(`عندكم وما فيها ${extra.length}`)) : null),
+          fresh.length ? box(arNum(`جديدة — تُضاف (${fresh.length})`), 'miss', rowsNew) : null,
+          edits.length ? box(arNum(`تعديل على الموجودين (${edits.length})`), 'moved', rowsEdit) : null,
+          extra.length ? box(arNum(`عندكم وما هو في القائمة (${extra.length})`), 'extra',
+            el('div', { class: 'cmp-list' }, extra.map((x) => el('div', null, x.n,
+              el('small', { class: 'muted' }, ' ' + (x.c || '—')))))) : null,
+          fresh.length || edits.length ? el('button', {
             class: 'btn primary big', type: 'button', style: 'margin-top:10px',
             onclick: () => {
               const patch = {};
               const used = new Set();
+              let add = 0;
+              let upd = 0;
               let dup = 0;
-              let n = 0;
-              for (const r of rows) {
-                const id = r.sel.value;
-                if (!id || !byId[id]) continue;
-                if (used.has(id)) { dup++; continue; }
-                used.add(id);
-                if (byId[id].n !== r.ln.name) { patch[`${id}/n`] = r.ln.name; n++; }
-                // نقل الصف على مطابقة ظنّية ينقل الطالب لصف غلط، فنشترط اليقين
-                if (r.ln.cls && byId[id].c !== r.ln.cls && (r.ln.manual || r.ln.sc === 100)) patch[`${id}/c`] = r.ln.cls;
+              // سطر رُبط يدويًا بطالب = تعديل عليه، لا طالب جديد
+              for (const l of fresh) {
+                const id = l.sel.value;
+                if (id && byId[id]) {
+                  if (used.has(id)) { dup++; continue; }
+                  used.add(id);
+                  if (byId[id].n !== l.name) { patch[`${id}/n`] = l.name; upd++; }
+                  if (l.cls !== '—' && String(byId[id].c || '') !== l.cls) { patch[`${id}/c`] = l.cls; upd++; }
+                  continue;
+                }
+                if (!l.cb.checked) continue;
+                patch['s' + Date.now().toString(36) + (add++).toString(36) + Math.random().toString(36).slice(2, 4)] = {
+                  n: l.name, c: l.cls, b: bid,
+                };
               }
-              if (dup) { toast(`${names(dup)} مربوطة بنفس الطالب — صحّحها أولًا`, 'err'); return; }
+              for (const l of edits) {
+                if (!l.cb.checked) continue;
+                if (used.has(l.id)) { dup++; continue; }
+                used.add(l.id);
+                const st = byId[l.id];
+                if (st.n !== l.name) { patch[`${l.id}/n`] = l.name; upd++; }
+                if (l.cls !== '—' && String(st.c || '') !== l.cls) { patch[`${l.id}/c`] = l.cls; upd++; }
+              }
+              if (dup) { toast('سطران مربوطان بنفس الطالب — صحّحهما أولًا', 'err'); return; }
               if (!Object.keys(patch).length) { toast('ما فيه تغيير'); return; }
               write('PATCH', 'students', patch);
               ta.value = '';
-              toast(`تم تحديث ${names(n)}`, 'ok');
+              out.replaceChildren();
               reviewing = false;
+              toast(`${add ? `أُضيف ${pupils(add)}` : ''}${add && upd ? '، و' : ''}${upd ? arNum(`عُدّل ${upd}`) : ''}`.trim() || 'تم', 'ok');
               render();
             },
-          }, 'احفظ التحديث'),
-          el('button', {
-            class: 'btn ghost', type: 'button', style: 'margin-top:10px',
-            onclick: () => { reviewing = false; out.replaceChildren(); },
-          }, 'إلغاء'),
-          missed.length ? el('details', { style: 'margin-top:10px' },
-            el('summary', null, `طلبة ما وصلهم تحديث (${missed.length})`),
-            el('p', { class: 'hint' }, missed.map((s) => `${s.n} (${s.c || '—'})`).join('، '))) : null);
+          }, 'احفظ التغييرات') : el('p', { class: 'hint ok' }, '✅ القائمة مطابقة لطلبة هذا المبنى.'),
+        ].filter(Boolean));
       }
 
-      return card;
+      return [
+        el('p', { class: 'hint' }, 'أداة واحدة للثلاث: تضيف الجدد، وتحدّث أسماء الموجودين وصفوفهم، وتقول لك مين عندكم وما هو في القائمة. راجع قبل الحفظ.'),
+        ta,
+        el('div', { class: 'inline wrap', style: 'margin-top:8px' },
+          el('span', null, 'القائمة تخص'), bSel, defCls,
+          el('button', { class: 'btn primary', type: 'button', onclick: run }, 'طابِق وراجِع')),
+        out,
+      ];
     }
 
     function toolsCard() {
@@ -2754,6 +2636,21 @@ ${openLink}
         el('p', { class: 'hint' }, el('a', { href: link('home') }, '← رجوع للرئيسية')));
     }
 
+    // بطاقة كاملة تصير قسمًا مطويًا داخل مجموعة: أربع عشرة بطاقة كانت تطوّل الصفحة
+    // بلا داعٍ، والعنوان الأصلي يصير عنوان القسم.
+    const subOf = (cardEl, id) => {
+      if (!cardEl || !cardEl.querySelector) return null;
+      const h = cardEl.querySelector('h2');
+      const title = h ? h.textContent : id;
+      if (h) h.remove();
+      return el('details', { class: 'sub', ...keepOpen('s-' + id) },
+        el('summary', null, title),
+        el('div', { class: 'sub-body' }, [...cardEl.childNodes]));
+    };
+    const subNew = (title, id, kids) => el('details', { class: 'sub', ...keepOpen('s-' + id) },
+      el('summary', null, title), el('div', { class: 'sub-body' }, kids));
+    const withSubs = (main, ...kids) => { main.append(...kids.filter(Boolean)); return main; };
+
     function render() {
       pending = false;
       if (!ready) { body.replaceChildren(el('p', { class: 'empty-note' }, 'جاري التحميل…')); return; }
@@ -2769,19 +2666,17 @@ ${openLink}
             onclick: () => { seedFill(); toast('تمت التعبئة', 'ok'); },
           }, 'تعبئة القائمة')) : '',
         buildingsCard(),
-        classesCard(),
-        moveClassCard(),
-        studentsCard(),
+        withSubs(classesCard(),
+          subOf(moveClassCard(), 'move'),
+          subOf(migrateCard(), 'mig')),
+        withSubs(studentsCard(),
+          subNew('لصق قائمة أو كشف', 'paste', pasteBox())),
         linksCard(),
-        parentsCard(),
-        civilCard(),
-        settingsCard(),
-        migrateCard(),
-        pinCard(),
-        compareCard(),
-        renameCard(),
-        bulkCard(),
-        toolsCard());
+        withSubs(parentsCard(),
+          subOf(civilCard(), 'civil')),
+        withSubs(settingsCard(),
+          subOf(pinCard(), 'pin'),
+          subOf(toolsCard(), 'tools')));
       window.scrollTo(0, y);
     }
 
